@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Brainboost - AI Career & Learning Acceleration</title>
+    <meta name="description" content="Brainboost is an AI-powered career readiness and learning platform with personalized skill gap roadmaps, verified opportunities, Connectivity professional networking, fraud detection, and Nebula AI advisor." />
+    <meta property="og:title" content="Brainboost - AI Career & Learning Acceleration" />
+    <meta property="og:description" content="Brainboost is an AI-powered career readiness and learning platform with personalized skill gap roadmaps, verified opportunities, Connectivity professional networking, fraud detection, and Nebula AI advisor." />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='24' fill='%234f46e5'/%3E%3Cpath d='M45 26 C35 26 25 32 23 43 C21 53 28 62 33 66 C36 68 40 72 45 74 M55 26 C65 26 75 32 77 43 C79 53 72 62 67 66 C64 68 60 72 55 74' stroke='%2338bdf8' stroke-width='4' fill='none' stroke-linecap='round'/%3E%3Cpath d='M50 18 L56 38 L47 41 L54 62 L44 65 L50 82' stroke='%23ffffff' stroke-width='4.5' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3Ccircle cx='34' cy='31' r='3.5' fill='%2338bdf8'/%3E%3Ccircle cx='66' cy='31' r='3.5' fill='%23f43f5e'/%3E%3C/svg%3E" />
+    <script>
+      (function() {
+        try {
+          var saved = localStorage.getItem('brainboost_theme') || localStorage.getItem('industryskill_theme');
+          var isDark = saved === 'dark';
+          if (!saved) {
+            isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+          }
+          if (isDark) {
+            document.documentElement.classList.add('dark');
+          } else {
+            document.documentElement.classList.remove('dark');
+          }
+        } catch (e) {}
+      })();
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
+  </head>
+  <body class="bg-[#f8fafc] dark:bg-[#0b1329] text-[#0f172a] dark:text-[#f8fafc] antialiased min-h-screen">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

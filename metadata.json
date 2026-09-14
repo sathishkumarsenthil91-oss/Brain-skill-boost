@@ -1,0 +1,7 @@
+{
+  "name": "Brainboost - AI Career & Learning Acceleration",
+  "description": "AI-powered career readiness and learning acceleration platform with personalized skill gap roadmaps, verified opportunities, Connectivity professional networking with peer learning libraries, fraud detection scanner, and Nebula AI advisor.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
