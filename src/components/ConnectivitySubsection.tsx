@@ -13,6 +13,7 @@ import { connectivityService, mapProfileToNetworkUser, isSupabaseConfigured } fr
 import { CertificateGenerationModal } from './CertificateGenerationModal';
 import { ConnectivityProfileSetupModal } from './connectivity/ConnectivityProfileSetupModal';
 import { ConnectivityDirectory } from './connectivity/ConnectivityDirectory';
+import { FollowersFollowingModal } from './connectivity/FollowersFollowingModal';
 
 interface ConnectivitySubsectionProps {
   user: UserProfile;
@@ -44,6 +45,7 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
   // Active chat conversation
   const [activeChatUser, setActiveChatUser] = useState<NetworkUser | null>(null);
   const [chatMessageText, setChatMessageText] = useState('');
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Modals
   const [showProfileSetupModal, setShowProfileSetupModal] = useState(false);
@@ -53,6 +55,17 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
   const [showEditProfileModal, setShowEditProfileModal] = useState(false);
   const [activeStoryUser, setActiveStoryUser] = useState<NetworkUser | null>(null);
   const [selectedCertificatePreview, setSelectedCertificatePreview] = useState<GeneratedCertificate | null>(null);
+
+  // Followers & Following List Modal
+  const [followListModal, setFollowListModal] = useState<{
+    isOpen: boolean;
+    type: 'followers' | 'following';
+    targetUser: NetworkUser | null;
+  }>({
+    isOpen: false,
+    type: 'followers',
+    targetUser: null,
+  });
 
   // New post form state & gallery image upload
   const [newPostContent, setNewPostContent] = useState('');
@@ -189,10 +202,25 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
       }
     );
 
+    // Subscribe to live network events (follow/unfollow, live count changes across site)
+    const unsubscribeEvents = connectivityService.subscribeToNetworkEvents(user, (event) => {
+      if (event.type === 'follow_change') {
+        reloadData();
+      }
+    });
+
     return () => {
       unsubscribeChat();
+      unsubscribeEvents();
     };
   }, [user]);
+
+  // Auto-scroll to bottom of chat when new message arrives or chat opened
+  useEffect(() => {
+    if (activeTab === 'chat' && activeChatUser) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [conversations, activeTab, activeChatUser]);
 
   const handleCompleteProfileSetup = (data: {
     userId: string;
@@ -272,14 +300,58 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
   };
 
   // Handle Follow Toggle
-  const handleFollowToggle = (targetUser: NetworkUser) => {
-    const updated = connectivityService.toggleFollow(targetUser.id, user);
-    setUsers(updated);
+  const handleFollowToggle = async (targetUser: NetworkUser) => {
+    const nextState = !targetUser.isFollowing;
+
+    // 1. Instant optimistic UI update
+    setUsers((prev) =>
+      prev.map((u) => {
+        if (u.id === targetUser.id) {
+          return {
+            ...u,
+            isFollowing: nextState,
+            followersCount: nextState ? u.followersCount + 1 : Math.max(0, u.followersCount - 1),
+            isFriend: Boolean(nextState && u.isFollower),
+          };
+        }
+        return u;
+      })
+    );
+
     if (viewingUser && viewingUser.id === targetUser.id) {
-      const refreshed = updated.find((u) => u.id === targetUser.id);
-      if (refreshed) setViewingUser(refreshed);
+      setViewingUser((prev) =>
+        prev
+          ? {
+              ...prev,
+              isFollowing: nextState,
+              followersCount: nextState ? prev.followersCount + 1 : Math.max(0, prev.followersCount - 1),
+              isFriend: Boolean(nextState && prev.isFollower),
+            }
+          : null
+      );
     }
-    showToast(targetUser.isFollowing ? `Unfollowed ${targetUser.name}` : `Following ${targetUser.name}!`);
+
+    // 2. Persist to Supabase and update state with real record
+    try {
+      const updated = await connectivityService.toggleFollow(targetUser.id, user);
+      setUsers(updated);
+      if (viewingUser && viewingUser.id === targetUser.id) {
+        const refreshed = updated.find((u) => u.id === targetUser.id);
+        if (refreshed) setViewingUser(refreshed);
+      }
+      showToast(nextState ? `Following ${targetUser.name}!` : `Unfollowed ${targetUser.name}`);
+    } catch (err) {
+      console.warn('Failed to update follow in database:', err);
+    }
+  };
+
+  // Open follow list modal for followers or following
+  const openFollowList = (type: 'followers' | 'following', target: NetworkUser) => {
+    setFollowListModal({
+      isOpen: true,
+      type,
+      targetUser: target,
+    });
   };
 
   // Handle Request Library Access
@@ -322,9 +394,44 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
   };
 
   // Open chat with a specific user from profile or story
-  const openChatWithUser = (targetUser: NetworkUser) => {
+  const openChatWithUser = async (targetUser: NetworkUser) => {
     setActiveChatUser(targetUser);
     setActiveTab('chat');
+
+    // Asynchronously fetch live message history from Supabase
+    try {
+      const liveMsgs = await connectivityService.fetchMessagesForUser(targetUser.id, user);
+      if (liveMsgs.length > 0) {
+        setConversations((prevConvs) => {
+          const exists = prevConvs.find((c) => c.participant.id === targetUser.id);
+          if (exists) {
+            return prevConvs.map((c) =>
+              c.participant.id === targetUser.id
+                ? {
+                    ...c,
+                    messages: liveMsgs,
+                    lastMessage: liveMsgs[liveMsgs.length - 1].content,
+                    lastMessageTime: liveMsgs[liveMsgs.length - 1].timestamp,
+                  }
+                : c
+            );
+          }
+          return [
+            {
+              id: `conv-${targetUser.id}`,
+              participant: targetUser,
+              lastMessage: liveMsgs[liveMsgs.length - 1].content,
+              lastMessageTime: liveMsgs[liveMsgs.length - 1].timestamp,
+              unreadCount: 0,
+              messages: liveMsgs,
+            },
+            ...prevConvs,
+          ];
+        });
+      }
+    } catch (err) {
+      console.warn('Could not fetch message history:', err);
+    }
   };
 
   // Save profile privacy / settings
@@ -853,19 +960,33 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-2 mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 text-center">
+            <div className="grid grid-cols-4 gap-1.5 mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 text-center">
               <div>
                 <span className="block text-base font-black text-purple-600 dark:text-purple-400">
                   {user.earnedCertificates?.length || 2}
                 </span>
                 <span className="text-[10px] text-slate-400 font-bold uppercase">Certs</span>
               </div>
-              <div>
+              <button
+                type="button"
+                onClick={() => openFollowList('followers', currentUserMapped)}
+                className="hover:opacity-80 transition-opacity cursor-pointer text-center"
+              >
                 <span className="block text-base font-black text-indigo-600 dark:text-indigo-400">
                   {currentUserMapped.followersCount}
                 </span>
-                <span className="text-[10px] text-slate-400 font-bold uppercase">Followers</span>
-              </div>
+                <span className="text-[10px] text-slate-400 font-bold uppercase hover:underline">Followers</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => openFollowList('following', currentUserMapped)}
+                className="hover:opacity-80 transition-opacity cursor-pointer text-center"
+              >
+                <span className="block text-base font-black text-blue-600 dark:text-blue-400">
+                  {currentUserMapped.followingCount}
+                </span>
+                <span className="text-[10px] text-slate-400 font-bold uppercase hover:underline">Following</span>
+              </button>
               <div>
                 <span className="block text-base font-black text-emerald-600 dark:text-emerald-400">
                   {user.learningProgress || 68}%
@@ -1134,6 +1255,7 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
                         );
                       })
                     )}
+                    <div ref={messagesEndRef} />
                   </div>
 
                   {/* Message Input Box */}
@@ -1180,6 +1302,22 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
       {/* ========================================================================= */}
       {activeTab === 'profile' && (
         <div className="max-w-5xl mx-auto w-full px-3 sm:px-6 py-5 pb-28 space-y-4 sm:space-y-6 flex-1 min-w-0">
+          {/* Back button when inspecting a peer profile */}
+          {!isViewingSelf && (
+            <div className="flex items-center justify-between">
+              <button
+                onClick={() => {
+                  setViewingUser(null);
+                  setActiveTab('home');
+                }}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-white dark:bg-[#131b2e] border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-700 dark:text-slate-300 hover:text-purple-600 transition-colors shadow-2xs cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+                Back to Feed & Network
+              </button>
+            </div>
+          )}
+
           {/* Top Banner & Profile Header */}
           <div className="bg-white dark:bg-[#131b2e] rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-xs overflow-hidden">
             {/* Cover Image */}
@@ -1340,18 +1478,26 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
                   </span>
                   <span className="text-slate-500">Posts</span>
                 </div>
-                <div>
+                <button
+                  type="button"
+                  onClick={() => openFollowList('followers', activeProfile)}
+                  className="hover:text-purple-600 dark:hover:text-purple-400 transition-colors cursor-pointer text-left flex items-center"
+                >
                   <span className="font-extrabold text-slate-900 dark:text-white mr-1">
                     {activeProfile.followersCount}
                   </span>
-                  <span className="text-slate-500">Followers</span>
-                </div>
-                <div>
+                  <span className="text-slate-500 hover:underline">Followers</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openFollowList('following', activeProfile)}
+                  className="hover:text-purple-600 dark:hover:text-purple-400 transition-colors cursor-pointer text-left flex items-center"
+                >
                   <span className="font-extrabold text-slate-900 dark:text-white mr-1">
                     {activeProfile.followingCount}
                   </span>
-                  <span className="text-slate-500">Following</span>
-                </div>
+                  <span className="text-slate-500 hover:underline">Following</span>
+                </button>
                 <div>
                   <span className="font-extrabold text-purple-600 dark:text-purple-400 mr-1">
                     {activeProfile.certificates?.length || 0}
@@ -2210,6 +2356,27 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
             if (!isFirstTimeSetup) {
               setShowProfileSetupModal(false);
             }
+          }}
+        />
+      )}
+
+      {/* 7. Followers & Following List Modal */}
+      {followListModal.isOpen && followListModal.targetUser && (
+        <FollowersFollowingModal
+          isOpen={followListModal.isOpen}
+          initialType={followListModal.type}
+          targetUser={followListModal.targetUser}
+          currentUser={user}
+          onClose={() => setFollowListModal({ isOpen: false, type: 'followers', targetUser: null })}
+          onSelectUser={(selectedPeer) => {
+            setViewingUser(selectedPeer);
+            setActiveTab('profile');
+          }}
+          onOpenChat={(targetPeer) => {
+            openChatWithUser(targetPeer);
+          }}
+          onFollowToggle={(targetPeer) => {
+            handleFollowToggle(targetPeer);
           }}
         />
       )}

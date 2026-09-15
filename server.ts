@@ -1,15 +1,11 @@
 import express from 'express';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 import OpenAI from 'openai';
 import { createServer as createViteServer } from 'vite';
 
 dotenv.config();
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = 3000;
@@ -175,11 +171,12 @@ app.post('/api/ai/chat', async (req, res) => {
 ${typeof learningTracksContext === 'string' ? learningTracksContext : JSON.stringify(learningTracksContext, null, 2)}`
     : '';
 
-  const systemInstruction = `You are Nebula AI, the real-time multilingual AI career mentor, code educator, and technical readiness advisor for the IndustrySkill platform.
+  const systemInstruction = `You are Nebula AI, a world-class large language model, technical mentor, and career readiness advisor for the Brainboost platform.
+You have deep, versatile expertise in modern software engineering, web development (React 19, TypeScript, Next.js, Node.js), algorithms, system design, databases, mock technical interviews, and resume optimization.
 ${modeContext}
 ${languageInstruction}
 
-User Profile Context (Ground Truth - do not invent or fabricate outside this context):
+User Profile Context:
 ${userProfile ? JSON.stringify({
   name: userProfile.name || 'Student Developer',
   targetRole: userProfile.targetRole || 'Full Stack Engineer',
@@ -190,17 +187,15 @@ ${userProfile ? JSON.stringify({
 }, null, 2) : 'Student targeting Full Stack Developer.'}
 ${learningContextPrompt}
 
-CRITICAL ANTI-HALLUCINATION & FACTUAL GROUNDING DIRECTIVES:
-- Ground all responses strictly on verified computer science industry standards (React 19, TypeScript, modern REST/GraphQL, PostgreSQL).
-- NEVER invent, assume, or hallucinate user information (such as non-existent degrees, fake universities, unverified GPAs, or fabricated job history).
-- If referring to the user, use ONLY their verified profile attributes. Never invent credentials.
-- Provide clear, actionable, structured career and technical advice.
-- When explaining code or architectural concepts, use clean markdown with high readability and syntax-highlighted code blocks.
-- Be encouraging, precise, and practical. Keep answers direct and well formatted with bullet points and bold key terms.`;
+CORE LLM DIRECTIVES:
+- Directly answer whatever the user asks: whether it is coding, debugging, technical explanations, algorithms, career advice, interview questions, or general queries.
+- Format responses cleanly using rich Markdown: bold key terms, structured bullet points, and code blocks with syntax highlighting (e.g. \`\`\`typescript, \`\`\`python, \`\`\`sql).
+- Keep explanations intuitive, technically rigorous, concise, and helpful.
+- If the user writes in a specific language (or selects a language), respond fluently in that language.`;
 
   const config: any = {
     systemInstruction,
-    temperature: 0.6,
+    temperature: 0.7,
   };
 
   if (thinkingMode) {
@@ -224,14 +219,14 @@ CRITICAL ANTI-HALLUCINATION & FACTUAL GROUNDING DIRECTIVES:
   });
 
   let reply = '';
-  let usedModel = thinkingMode ? 'gemini-3.7-flash' : 'gemini-3.7-flash';
+  let usedModel = thinkingMode ? 'gemini-3.5-flash-lite' : 'gemini-3.5-flash-lite';
 
-  // Tier 1: Try Gemini (Official high-speed Gemini 3 series models)
+  // Tier 1: Try Gemini (Official high-speed models with gemini-3.5-flash-lite priority)
   try {
     const ai = getAIClient();
     const candidateModels = thinkingMode
-      ? ['gemini-3.7-flash', 'gemini-3.1-flash-lite', 'gemini-3.1-pro-preview']
-      : ['gemini-3.7-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
+      ? ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.7-flash']
+      : ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-flash-latest'];
 
     let geminiSuccess = false;
     for (const candidate of candidateModels) {
@@ -329,11 +324,12 @@ app.post('/api/ai/chat/stream', async (req, res) => {
 ${typeof learningTracksContext === 'string' ? learningTracksContext : JSON.stringify(learningTracksContext, null, 2)}`
     : '';
 
-  const systemInstruction = `You are Nebula AI, the real-time multilingual AI career mentor, code educator, and technical readiness advisor for the IndustrySkill platform.
+  const systemInstruction = `You are Nebula AI, a world-class large language model, technical mentor, and career readiness advisor for the Brainboost platform.
+You have deep, versatile expertise in modern software engineering, web development (React 19, TypeScript, Next.js, Node.js), algorithms, system design, databases, mock technical interviews, and resume optimization.
 ${modeContext}
 ${languageInstruction}
 
-User Profile Context (Ground Truth - do not invent or fabricate outside this context):
+User Profile Context:
 ${userProfile ? JSON.stringify({
   name: userProfile.name || 'Student Developer',
   targetRole: userProfile.targetRole || 'Full Stack Engineer',
@@ -344,17 +340,15 @@ ${userProfile ? JSON.stringify({
 }, null, 2) : 'Student targeting Full Stack Developer.'}
 ${learningContextPrompt}
 
-CRITICAL ANTI-HALLUCINATION & FACTUAL GROUNDING DIRECTIVES:
-- Ground all responses strictly on verified computer science industry standards (React 19, TypeScript, modern REST/GraphQL, PostgreSQL).
-- NEVER invent, assume, or hallucinate user information (such as non-existent degrees, fake universities, unverified GPAs, or fabricated job history).
-- If referring to the user, use ONLY their verified profile attributes. Never invent credentials.
-- Provide clear, actionable, structured career and technical advice.
-- When explaining code or architectural concepts, use clean markdown with high readability and syntax-highlighted code blocks.
-- Be encouraging, precise, and practical. Keep answers direct and well formatted with bullet points and bold key terms.`;
+CORE LLM DIRECTIVES:
+- Directly answer whatever the user asks: whether it is coding, debugging, technical explanations, algorithms, career advice, interview questions, or general queries.
+- Format responses cleanly using rich Markdown: bold key terms, structured bullet points, and code blocks with syntax highlighting (e.g. \`\`\`typescript, \`\`\`python, \`\`\`sql).
+- Keep explanations intuitive, technically rigorous, concise, and helpful.
+- If the user writes in a specific language (or selects a language), respond fluently in that language.`;
 
   const config: any = {
     systemInstruction,
-    temperature: 0.6,
+    temperature: 0.7,
   };
 
   if (thinkingMode) {
@@ -379,12 +373,12 @@ CRITICAL ANTI-HALLUCINATION & FACTUAL GROUNDING DIRECTIVES:
 
   let streamCompleted = false;
 
-  // Tier 1: Try Gemini Streaming with high-speed official models
+  // Tier 1: Try Gemini Streaming with high-speed gemini-3.5-flash-lite priority
   try {
     const ai = getAIClient();
     const candidateModels = thinkingMode
-      ? ['gemini-2.5-pro', 'gemini-3.7-flash', 'gemini-3.1-flash-lite', 'gemini-3.1-pro-preview']
-      : ['gemini-2.5-flash', 'gemini-3.7-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
+      ? ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.7-flash']
+      : ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-flash-latest'];
 
     for (const candidate of candidateModels) {
       try {
@@ -634,9 +628,9 @@ Generate structured JSON containing:
     };
 
     let parsedSummary: any = null;
-    let usedModel = 'gemini-3.7-flash';
+    let usedModel = 'gemini-3.5-flash-lite';
 
-    const candidateModels = ['gemini-3.7-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
+    const candidateModels = ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-flash-latest'];
     let geminiSuccess = false;
 
     for (const candidate of candidateModels) {
@@ -805,7 +799,7 @@ app.post('/api/ai/translate', async (req, res) => {
   try {
     const ai = getAIClient();
     const response = await ai.models.generateContent({
-      model: 'gemini-3.7-flash',
+      model: 'gemini-3.5-flash-lite',
       contents: prompt,
       config: {
         systemInstruction: `You are a professional multilingual translator specialized in computer science and career guidance. Translate directly into ${targetLanguage} without preamble.`,
@@ -850,7 +844,7 @@ app.post('/api/ai/scan-opportunity', async (req, res) => {
       return res.status(400).json({ error: 'Please provide opportunity URL or content to scan.' });
     }
 
-    const model = useHighThinking ? 'gemini-3.1-pro-preview' : 'gemini-3.7-flash';
+    const model = useHighThinking ? 'gemini-3.5-flash-lite' : 'gemini-3.5-flash-lite';
 
     const prompt = `Analyze this job posting, internship offer, or recruitment message for scams, red flags, unrealistic promises, and security risks.
 
@@ -871,8 +865,8 @@ Return a valid JSON object matching the exact schema.`;
     let usedModel = model;
 
     const candidateModels = useHighThinking
-      ? ['gemini-3.1-pro-preview', 'gemini-3.7-flash', 'gemini-3.1-flash-lite']
-      : ['gemini-3.7-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
+      ? ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.7-flash']
+      : ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest'];
 
     let geminiSuccess = false;
     const ai = getAIClient();
@@ -1029,7 +1023,7 @@ app.post('/api/ai/extract-skills', async (req, res) => {
     let skills: string[] = [];
 
     if (!skills || skills.length === 0) {
-      const candidateSkillModels = ['gemini-3.1-flash-lite', 'gemini-3.7-flash', 'gemini-flash-latest'];
+      const candidateSkillModels = ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest'];
       const ai = getAIClient();
       for (const candidate of candidateSkillModels) {
         try {
@@ -1105,7 +1099,7 @@ Produce a detailed learning pathway containing:
 5. 3 recommended high-value projects and practice resources.`;
 
     let roadmapData: any = null;
-    const candidateRoadmapModels = ['gemini-3.1-pro-preview', 'gemini-3.7-flash', 'gemini-3.1-flash-lite'];
+    const candidateRoadmapModels = ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.7-flash'];
     let geminiSuccess = false;
     const ai = getAIClient();
 
