@@ -1,3 +1,11 @@
+/**
+ * @deprecated NOTE: This file is preserved solely for initial bootstrap defaults,
+ * asset URLs, and fallback data structures when network is offline.
+ *
+ * ALL active actions, database mutations, and catalog fetches are wired to real
+ * Supabase tables and queries via `src/services/supabaseService.ts`.
+ */
+
 import {
   UserProfile,
   SkillItem,

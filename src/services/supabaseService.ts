@@ -17,6 +17,8 @@ import {
   WebinarItem,
   AssignmentItem,
   IndustryTool,
+  YouTubeLearningTrack,
+  ChatMessage,
 } from '../types';
 import {
   initialCourses,
@@ -175,6 +177,59 @@ export function mapProfileToNetworkUser(user: UserProfile, libraryItems?: UserLi
   };
 }
 
+/**
+ * Resolves user's unique UUID in Supabase database from session or profile email lookup
+ */
+export async function resolveUserUuid(client: any, user?: UserProfile): Promise<string | null> {
+  if (!client) return null;
+  try {
+    const { data: sessionData } = await client.auth.getSession();
+    if (sessionData?.session?.user?.id) {
+      return sessionData.session.user.id;
+    }
+  } catch {}
+
+  const email = user?.email?.trim().toLowerCase();
+  if (!email) return null;
+
+  try {
+    const { data: profile } = await client
+      .from('profiles')
+      .select('id')
+      .eq('email', email)
+      .maybeSingle();
+
+    if (profile?.id) {
+      return profile.id;
+    }
+
+    // Auto-create profile in Supabase if it doesn't exist
+    if (user) {
+      const { data: newProfile, error } = await client
+        .from('profiles')
+        .insert({
+          email,
+          name: user.name || user.email.split('@')[0],
+          target_role: user.targetRole || 'Full Stack Engineer',
+          degree: user.degree || 'B.Tech Computer Science',
+          college: user.college || 'Tech Institute',
+          grad_year: user.gradYear || '2026',
+          avatar_url: user.avatarUrl,
+          overall_readiness: user.overallReadiness || 65,
+        })
+        .select('id')
+        .maybeSingle();
+
+      if (!error && newProfile?.id) {
+        return newProfile.id;
+      }
+    }
+  } catch (err) {
+    console.warn('resolveUserUuid error:', err);
+  }
+  return null;
+}
+
 // ============================================================================
 // REAL-TIME CONNECTIVITY SERVICE
 // ============================================================================
@@ -216,6 +271,7 @@ export const connectivityService = {
         target_role: user.targetRole || 'Full Stack Engineer',
         location: user.location || 'Remote',
         is_private_account: Boolean(user.isPrivateAccount),
+        overall_readiness: user.overallReadiness || 65,
         updated_at: new Date().toISOString(),
       };
 
@@ -225,9 +281,57 @@ export const connectivityService = {
         profilePayload.id = authSession.session.user.id;
       }
 
-      await existingSupabaseClient.from('profiles').upsert(profilePayload, {
+      const { data: upsertedProfile } = await existingSupabaseClient.from('profiles').upsert(profilePayload, {
         onConflict: 'email',
-      });
+      }).select('id').maybeSingle();
+
+      const profileId = profilePayload.id || upsertedProfile?.id;
+      if (profileId) {
+        // Sync user projects if present
+        if (Array.isArray(user.projects) && user.projects.length > 0) {
+          const projectRows = user.projects.map((p) => ({
+            user_id: profileId,
+            title: p.title,
+            description: p.description,
+            tags: p.tags || [],
+            github_url: p.githubUrl,
+            demo_url: p.demoUrl,
+            date: p.date || new Date().toISOString().split('T')[0],
+            stars: p.stars || 0,
+          }));
+          await existingSupabaseClient.from('user_projects').delete().eq('user_id', profileId);
+          await existingSupabaseClient.from('user_projects').insert(projectRows);
+        }
+
+        // Sync user internships if present
+        if (Array.isArray(user.internships) && user.internships.length > 0) {
+          const internshipRows = user.internships.map((i) => ({
+            user_id: profileId,
+            role: i.role,
+            company: i.company,
+            period: i.period,
+            location: i.location,
+            description: i.description,
+            verified: Boolean(i.verified),
+          }));
+          await existingSupabaseClient.from('user_internships').delete().eq('user_id', profileId);
+          await existingSupabaseClient.from('user_internships').insert(internshipRows);
+        }
+
+        // Sync user achievements if present
+        if (Array.isArray(user.achievements) && user.achievements.length > 0) {
+          const achievementRows = user.achievements.map((a) => ({
+            user_id: profileId,
+            title: a.title,
+            issuer: a.issuer,
+            date: a.date,
+            badge: a.badge,
+            description: a.description,
+          }));
+          await existingSupabaseClient.from('user_achievements').delete().eq('user_id', profileId);
+          await existingSupabaseClient.from('user_achievements').insert(achievementRows);
+        }
+      }
     } catch (err) {
       console.warn('Supabase profile sync notice:', err);
     }
@@ -564,18 +668,32 @@ export const connectivityService = {
   // Like & Comment handlers
   toggleLike(postId: string, currentUser: UserProfile): NetworkPost[] {
     const posts = this.getPosts(currentUser);
+    let targetPost: NetworkPost | undefined;
     const updated = posts.map((p) => {
       if (p.id === postId) {
         const isLiked = !p.isLiked;
-        return {
+        targetPost = {
           ...p,
           isLiked,
           likesCount: isLiked ? p.likesCount + 1 : Math.max(0, p.likesCount - 1),
         };
+        return targetPost;
       }
       return p;
     });
     this.saveLocalPosts(updated, currentUser);
+
+    if (existingSupabaseClient) {
+      resolveUserUuid(existingSupabaseClient, currentUser).then((uid) => {
+        if (!uid) return;
+        if (targetPost?.isLiked) {
+          existingSupabaseClient.from('post_likes').upsert({ post_id: postId, user_id: uid }, { onConflict: 'user_id, post_id' }).then(() => {});
+        } else {
+          existingSupabaseClient.from('post_likes').delete().eq('post_id', postId).eq('user_id', uid).then(() => {});
+        }
+      }).catch((err) => console.warn('Supabase toggleLike notice:', err));
+    }
+
     return updated;
   },
 
@@ -604,6 +722,18 @@ export const connectivityService = {
       return p;
     });
     this.saveLocalPosts(updated, currentUser);
+
+    if (existingSupabaseClient) {
+      resolveUserUuid(existingSupabaseClient, currentUser).then((uid) => {
+        if (!uid) return;
+        existingSupabaseClient.from('post_comments').insert({
+          post_id: postId,
+          author_id: uid,
+          content,
+        }).then(() => {});
+      }).catch((err) => console.warn('Supabase addComment notice:', err));
+    }
+
     return updated;
   },
 
@@ -853,9 +983,10 @@ export const connectivityService = {
   // Toggle user follow / connect
   toggleFollow(targetUserId: string, currentUser: UserProfile): NetworkUser[] {
     const users = this.getLocalUsers(currentUser);
+    let nextState = false;
     const updated = users.map((u) => {
       if (u.id === targetUserId) {
-        const nextState = !u.isFollowing;
+        nextState = !u.isFollowing;
         const isFriend = Boolean(nextState && u.isFollower);
         return {
           ...u,
@@ -867,6 +998,22 @@ export const connectivityService = {
       return u;
     });
     this.saveLocalUsers(updated, currentUser);
+
+    if (existingSupabaseClient) {
+      resolveUserUuid(existingSupabaseClient, currentUser).then((uid) => {
+        if (!uid) return;
+        if (nextState) {
+          existingSupabaseClient.from('user_follows').upsert({
+            follower_id: uid,
+            following_id: targetUserId,
+            status: 'approved',
+          }, { onConflict: 'follower_id, following_id' }).then(() => {});
+        } else {
+          existingSupabaseClient.from('user_follows').delete().eq('follower_id', uid).eq('following_id', targetUserId).then(() => {});
+        }
+      }).catch((err) => console.warn('Supabase toggleFollow notice:', err));
+    }
+
     return updated;
   },
 
@@ -921,6 +1068,19 @@ export const connectivityService = {
 
     const updated = [newReq, ...existing];
     this.saveAccessRequests(updated, currentUser);
+
+    if (existingSupabaseClient) {
+      resolveUserUuid(existingSupabaseClient, currentUser).then((uid) => {
+        if (!uid) return;
+        existingSupabaseClient.from('library_access_requests').upsert({
+          requester_id: uid,
+          target_user_id: targetUserId,
+          status: 'pending',
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'requester_id, target_user_id' }).then(() => {});
+      }).catch((err) => console.warn('Supabase requestLibraryAccess notice:', err));
+    }
+
     return { success: true, request: newReq };
   },
 
@@ -937,6 +1097,18 @@ export const connectivityService = {
       return r;
     });
     this.saveAccessRequests(updated, currentUser);
+
+    if (existingSupabaseClient) {
+      const matched = existing.find((r) => r.id === requestId);
+      if (matched) {
+        existingSupabaseClient
+          .from('library_access_requests')
+          .update({ status: decision, updated_at: new Date().toISOString() })
+          .eq('requester_id', matched.requesterId)
+          .then(() => {});
+      }
+    }
+
     return updated;
   },
 
@@ -1295,9 +1467,9 @@ export const supabaseService = {
     }
   },
 
-  // 2. Fetch Verified Courses from Supabase `courses` table
-  async fetchCourses(): Promise<CourseItem[]> {
-    const cacheKey = 'catalog_courses_v1';
+  // 2. Fetch Verified Courses from Supabase `courses` table and user `course_enrollments`
+  async fetchCourses(currentUser?: UserProfile): Promise<CourseItem[]> {
+    const cacheKey = `catalog_courses_${currentUser?.email || 'all'}`;
     const cached = getFromMemoryCache<CourseItem[]>(cacheKey);
     if (cached) return cached;
 
@@ -1305,25 +1477,49 @@ export const supabaseService = {
       try {
         const { data, error } = await existingSupabaseClient.from('courses').select('*').limit(50);
         if (!error && Array.isArray(data) && data.length > 0) {
-          const mapped: CourseItem[] = data.map((c: any) => ({
-            id: c.id,
-            title: c.title,
-            provider: c.provider,
-            category: c.category,
-            level: c.level || 'Intermediate',
-            duration: c.duration || '15 Hours',
-            modulesCount: c.modules_count || 4,
-            rating: Number(c.rating) || 4.8,
-            enrolledCount: c.enrolled_count || 1200,
-            progress: 0,
-            isEnrolled: false,
-            coverImage: c.cover_image || 'https://images.unsplash.com/photo-1517694712202-14dd9538aa97?w=800&auto=format&fit=crop&q=80',
-            thumbnail: c.thumbnail || c.cover_image,
-            skillsTaught: c.skills_taught || [],
-            description: c.description || '',
-            instructor: c.instructor || { name: 'Staff Engineer', role: 'Architect', company: 'Brainboost' },
-            modules: c.modules || [],
-          }));
+          const enrolledMap = new Map<string, { progress: number; completedLessons: string[]; isCompleted: boolean }>();
+          if (currentUser) {
+            const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
+            if (uid) {
+              const { data: enrollments } = await existingSupabaseClient
+                .from('course_enrollments')
+                .select('*')
+                .eq('user_id', uid);
+              if (Array.isArray(enrollments)) {
+                for (const enr of enrollments) {
+                  enrolledMap.set(enr.course_id, {
+                    progress: enr.progress || 0,
+                    completedLessons: enr.completed_lessons || [],
+                    isCompleted: Boolean(enr.is_completed),
+                  });
+                }
+              }
+            }
+          }
+
+          const mapped: CourseItem[] = data.map((c: any) => {
+            const enr = enrolledMap.get(c.id);
+            return {
+              id: c.id,
+              title: c.title,
+              provider: c.provider,
+              category: c.category,
+              level: c.level || 'Intermediate',
+              duration: c.duration || '15 Hours',
+              modulesCount: c.modules_count || (c.modules?.length || 4),
+              rating: Number(c.rating) || 4.8,
+              enrolledCount: c.enrolled_count || 1200,
+              progress: enr ? enr.progress : 0,
+              isEnrolled: Boolean(enr),
+              enrolled: Boolean(enr),
+              coverImage: c.cover_image || 'https://images.unsplash.com/photo-1517694712202-14dd9538aa97?w=800&auto=format&fit=crop&q=80',
+              thumbnail: c.thumbnail || c.cover_image,
+              skillsTaught: c.skills_taught || [],
+              description: c.description || '',
+              instructor: c.instructor || { name: 'Staff Engineer', role: 'Architect', company: 'Brainboost' },
+              modules: c.modules || [],
+            };
+          });
           setToMemoryCache(cacheKey, mapped);
           return mapped;
         }
@@ -1336,9 +1532,134 @@ export const supabaseService = {
     return initialCourses;
   },
 
-  // 3. Fetch Real Opportunities from Supabase `opportunities` table
-  async fetchOpportunities(): Promise<OpportunityItem[]> {
-    const cacheKey = 'catalog_opportunities_v1';
+  async enrollInCourse(courseId: string, isEnrolled: boolean, currentUser: UserProfile): Promise<void> {
+    if (!existingSupabaseClient) return;
+    try {
+      const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
+      if (!uid) return;
+      if (isEnrolled) {
+        await existingSupabaseClient.from('course_enrollments').upsert({
+          user_id: uid,
+          course_id: courseId,
+          progress: 5,
+          is_completed: false,
+          enrolled_at: new Date().toISOString(),
+        }, { onConflict: 'user_id, course_id' });
+      } else {
+        await existingSupabaseClient.from('course_enrollments').delete().eq('user_id', uid).eq('course_id', courseId);
+      }
+    } catch (e) {
+      console.warn('enrollInCourse error:', e);
+    }
+  },
+
+  async updateCourseProgress(courseId: string, progress: number, completedLessons: string[], currentUser: UserProfile): Promise<void> {
+    if (!existingSupabaseClient) return;
+    try {
+      const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
+      if (!uid) return;
+      await existingSupabaseClient.from('course_enrollments').upsert({
+        user_id: uid,
+        course_id: courseId,
+        progress,
+        completed_lessons: completedLessons,
+        is_completed: progress >= 100,
+        completed_at: progress >= 100 ? new Date().toISOString() : null,
+      }, { onConflict: 'user_id, course_id' });
+    } catch (e) {
+      console.warn('updateCourseProgress error:', e);
+    }
+  },
+
+  // Real YouTube learning tracks from Supabase
+  async fetchYouTubeTracks(currentUser: UserProfile): Promise<YouTubeLearningTrack[]> {
+    if (existingSupabaseClient) {
+      try {
+        const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
+        if (uid) {
+          const { data, error } = await existingSupabaseClient
+            .from('youtube_learning_tracks')
+            .select('*')
+            .eq('user_id', uid)
+            .order('last_watched', { ascending: false });
+
+          if (!error && Array.isArray(data) && data.length > 0) {
+            return data.map((t: any) => ({
+              id: t.id,
+              userId: currentUser.email || 'default',
+              videoId: t.video_id,
+              videoUrl: t.video_url,
+              title: t.title,
+              channel: t.channel,
+              channelUrl: t.channel_url,
+              thumbnail: t.thumbnail,
+              durationSeconds: t.duration_seconds || 0,
+              durationFormatted: t.duration_formatted || '0m',
+              verifiedWatchedSeconds: t.verified_watched_seconds || 0,
+              currentTime: Number(t.current_time) || 0,
+              completionPercentage: Number(t.completion_percentage) || 0,
+              status: t.status || 'in_progress',
+              watchedRanges: t.watched_ranges || [],
+              aiSummary: t.ai_summary,
+              notes: t.notes,
+              learningRecord: t.learning_record,
+              lastWatched: t.last_watched,
+              dateAdded: t.created_at,
+            }));
+          }
+        }
+      } catch (err) {
+        console.warn('fetchYouTubeTracks error:', err);
+      }
+    }
+    return [];
+  },
+
+  async saveYouTubeTrack(track: YouTubeLearningTrack, currentUser: UserProfile): Promise<void> {
+    if (!existingSupabaseClient) return;
+    try {
+      const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
+      if (!uid) return;
+      await existingSupabaseClient.from('youtube_learning_tracks').upsert({
+        user_id: uid,
+        video_id: track.videoId,
+        video_url: track.videoUrl,
+        title: track.title,
+        channel: track.channel,
+        channel_url: track.channelUrl,
+        thumbnail: track.thumbnail,
+        duration_seconds: track.durationSeconds || 0,
+        duration_formatted: track.durationFormatted || '0m',
+        verified_watched_seconds: track.verifiedWatchedSeconds || 0,
+        current_time: track.currentTime || 0,
+        completion_percentage: track.completionPercentage || 0,
+        status: track.status || 'in_progress',
+        watched_ranges: track.watchedRanges || [],
+        ai_summary: track.aiSummary,
+        notes: track.notes,
+        learning_record: track.learningRecord,
+        last_watched: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id, video_id' });
+    } catch (e) {
+      console.warn('saveYouTubeTrack error:', e);
+    }
+  },
+
+  async deleteYouTubeTrack(videoId: string, currentUser: UserProfile): Promise<void> {
+    if (!existingSupabaseClient) return;
+    try {
+      const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
+      if (!uid) return;
+      await existingSupabaseClient.from('youtube_learning_tracks').delete().eq('user_id', uid).eq('video_id', videoId);
+    } catch (e) {
+      console.warn('deleteYouTubeTrack error:', e);
+    }
+  },
+
+  // 3. Fetch Real Opportunities from Supabase `opportunities` table and `user_opportunity_interactions`
+  async fetchOpportunities(currentUser?: UserProfile): Promise<OpportunityItem[]> {
+    const cacheKey = `catalog_opportunities_${currentUser?.email || 'all'}`;
     const cached = getFromMemoryCache<OpportunityItem[]>(cacheKey);
     if (cached) return cached;
 
@@ -1346,22 +1667,44 @@ export const supabaseService = {
       try {
         const { data, error } = await existingSupabaseClient.from('opportunities').select('*').limit(50);
         if (!error && Array.isArray(data) && data.length > 0) {
-          const mapped: OpportunityItem[] = data.map((o: any) => ({
-            id: o.id,
-            title: o.title,
-            company: o.company,
-            locationType: (o.mode === 'Remote' || o.mode === 'Hybrid' || o.mode === 'Onsite') ? o.mode : 'Remote',
-            matchScore: Number(o.match_score) || 85,
-            duration: o.duration || '3 Months',
-            verified: Boolean(o.verified),
-            tags: Array.isArray(o.skills) ? o.skills : ['Full Stack', 'Engineering'],
-            companyLogoUrl: o.logo || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=100&auto=format&fit=crop&q=80',
-            description: o.description || '',
-            stipend: o.stipend || 'Competitive',
-            deadline: o.deadline || 'Rolling basis',
-            applied: false,
-            saved: false,
-          }));
+          const userInteractions = new Map<string, { saved: boolean; applied: boolean }>();
+          if (currentUser) {
+            const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
+            if (uid) {
+              const { data: interactions } = await existingSupabaseClient
+                .from('user_opportunity_interactions')
+                .select('*')
+                .eq('user_id', uid);
+              if (Array.isArray(interactions)) {
+                for (const inter of interactions) {
+                  userInteractions.set(inter.opportunity_id, {
+                    saved: Boolean(inter.saved),
+                    applied: Boolean(inter.applied),
+                  });
+                }
+              }
+            }
+          }
+
+          const mapped: OpportunityItem[] = data.map((o: any) => {
+            const userState = userInteractions.get(o.id);
+            return {
+              id: o.id,
+              title: o.title,
+              company: o.company,
+              locationType: (o.location_type || o.mode === 'Remote' || o.mode === 'Hybrid' || o.mode === 'Onsite') ? (o.location_type || o.mode) : 'Remote',
+              matchScore: Number(o.match_score) || 85,
+              duration: o.duration || '3 Months',
+              verified: Boolean(o.verified),
+              tags: Array.isArray(o.tags) ? o.tags : Array.isArray(o.skills) ? o.skills : ['Full Stack', 'Engineering'],
+              companyLogoUrl: o.company_logo_url || o.logo || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=100&auto=format&fit=crop&q=80',
+              description: o.description || '',
+              stipend: o.stipend || 'Competitive',
+              deadline: o.deadline || 'Rolling basis',
+              applied: userState ? userState.applied : false,
+              saved: userState ? userState.saved : false,
+            };
+          });
           setToMemoryCache(cacheKey, mapped);
           return mapped;
         }
@@ -1374,51 +1717,438 @@ export const supabaseService = {
     return initialOpportunities;
   },
 
-  // 4. Fetch Certifications
-  async fetchCertifications(): Promise<CertificationItem[]> {
-    const cacheKey = 'catalog_certifications_v1';
+  async toggleOpportunitySave(opportunityId: string, isSaved: boolean, currentUser: UserProfile): Promise<void> {
+    if (!existingSupabaseClient) return;
+    try {
+      const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
+      if (!uid) return;
+      await existingSupabaseClient.from('user_opportunity_interactions').upsert({
+        user_id: uid,
+        opportunity_id: opportunityId,
+        saved: isSaved,
+      }, { onConflict: 'user_id, opportunity_id' });
+    } catch (e) {
+      console.warn('toggleOpportunitySave error:', e);
+    }
+  },
+
+  async applyToOpportunity(opportunityId: string, currentUser: UserProfile): Promise<void> {
+    if (!existingSupabaseClient) return;
+    try {
+      const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
+      if (!uid) return;
+      await existingSupabaseClient.from('user_opportunity_interactions').upsert({
+        user_id: uid,
+        opportunity_id: opportunityId,
+        applied: true,
+        applied_at: new Date().toISOString(),
+      }, { onConflict: 'user_id, opportunity_id' });
+    } catch (e) {
+      console.warn('applyToOpportunity error:', e);
+    }
+  },
+
+  // 4. Fetch Certifications from Supabase `certifications` and `user_certifications`
+  async fetchCertifications(currentUser?: UserProfile): Promise<CertificationItem[]> {
+    const cacheKey = `catalog_certifications_${currentUser?.email || 'all'}`;
     const cached = getFromMemoryCache<CertificationItem[]>(cacheKey);
     if (cached) return cached;
+
+    if (existingSupabaseClient) {
+      try {
+        const { data, error } = await existingSupabaseClient.from('certifications').select('*').limit(50);
+        if (!error && Array.isArray(data) && data.length > 0) {
+          const userStatusMap = new Map<string, { status: 'Earned' | 'In Progress' | 'Planned'; prepProgress: number }>();
+          if (currentUser) {
+            const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
+            if (uid) {
+              const { data: userCerts } = await existingSupabaseClient
+                .from('user_certifications')
+                .select('*')
+                .eq('user_id', uid);
+              if (Array.isArray(userCerts)) {
+                for (const uc of userCerts) {
+                  userStatusMap.set(uc.certification_id, {
+                    status: uc.status,
+                    prepProgress: uc.prep_progress || 0,
+                  });
+                }
+              }
+            }
+          }
+
+          const mapped: CertificationItem[] = data.map((c: any) => {
+            const userState = userStatusMap.get(c.id);
+            return {
+              id: c.id,
+              title: c.title,
+              issuer: c.issuer,
+              badgeUrl: c.badge_url,
+              difficulty: c.difficulty || 'Associate',
+              marketValue: c.market_value || 'High',
+              status: userState?.status || c.status || 'Planned',
+              prepProgress: userState?.prepProgress ?? (c.prep_progress || 0),
+              examCode: c.exam_code,
+              targetDate: c.target_date,
+              skillsValidated: c.skills_validated || [],
+              voucherDiscount: c.voucher_discount,
+            };
+          });
+          setToMemoryCache(cacheKey, mapped);
+          return mapped;
+        }
+      } catch (err) {
+        console.warn('Certifications query fallback:', err);
+      }
+    }
 
     setToMemoryCache(cacheKey, initialCertifications);
     return initialCertifications;
   },
 
-  // 5. Fetch Webinars
-  async fetchWebinars(): Promise<WebinarItem[]> {
-    const cacheKey = 'catalog_webinars_v1';
+  async updateUserCertification(certificationId: string, status: 'Earned' | 'In Progress' | 'Planned', currentUser: UserProfile): Promise<void> {
+    if (!existingSupabaseClient) return;
+    try {
+      const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
+      if (!uid) return;
+      await existingSupabaseClient.from('user_certifications').upsert({
+        user_id: uid,
+        certification_id: certificationId,
+        status,
+        prep_progress: status === 'Earned' ? 100 : status === 'In Progress' ? 50 : 0,
+        earned_date: status === 'Earned' ? new Date().toISOString() : null,
+      }, { onConflict: 'user_id, certification_id' });
+    } catch (e) {
+      console.warn('updateUserCertification error:', e);
+    }
+  },
+
+  // 5. Fetch Webinars from Supabase `webinars` and `webinar_registrations`
+  async fetchWebinars(currentUser?: UserProfile): Promise<WebinarItem[]> {
+    const cacheKey = `catalog_webinars_${currentUser?.email || 'all'}`;
     const cached = getFromMemoryCache<WebinarItem[]>(cacheKey);
     if (cached) return cached;
+
+    if (existingSupabaseClient) {
+      try {
+        const { data, error } = await existingSupabaseClient.from('webinars').select('*').limit(50);
+        if (!error && Array.isArray(data) && data.length > 0) {
+          const userRegs = new Map<string, { isRegistered: boolean; isLiked: boolean; hasClaimedCertificate: boolean }>();
+          if (currentUser) {
+            const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
+            if (uid) {
+              const { data: regs } = await existingSupabaseClient
+                .from('webinar_registrations')
+                .select('*')
+                .eq('user_id', uid);
+              if (Array.isArray(regs)) {
+                for (const r of regs) {
+                  userRegs.set(r.webinar_id, {
+                    isRegistered: true,
+                    isLiked: Boolean(r.is_liked),
+                    hasClaimedCertificate: Boolean(r.has_claimed_certificate),
+                  });
+                }
+              }
+            }
+          }
+
+          const mapped: WebinarItem[] = data.map((w: any) => {
+            const userState = userRegs.get(w.id);
+            return {
+              id: w.id,
+              title: w.title,
+              speaker: w.speaker || { name: 'Principal Mentor', title: 'Tech Lead', company: 'Brainboost', avatar: '' },
+              dateTime: w.date_time || new Date().toISOString(),
+              duration: w.duration || '60m',
+              tags: w.tags || [],
+              status: w.status || 'Upcoming',
+              registered: Boolean(userState?.isRegistered),
+              isRegistered: Boolean(userState?.isRegistered),
+              attendeesCount: w.attendees_count || 0,
+              likesCount: w.likes_count || 0,
+              isLiked: Boolean(userState?.isLiked),
+              youtubeUrl: w.youtube_url,
+              youtubeVideoId: w.youtube_video_id,
+              zoomMeetingUrl: w.zoom_meeting_url,
+              zoomMeetingId: w.zoom_meeting_id,
+              zoomPasscode: w.zoom_passcode,
+              keyTakeaways: w.key_takeaways || [],
+              category: w.category,
+              description: w.description,
+              thumbnail: w.thumbnail,
+              certificateEligible: w.certificate_eligible !== false,
+              hasClaimedCertificate: Boolean(userState?.hasClaimedCertificate),
+            };
+          });
+          setToMemoryCache(cacheKey, mapped);
+          return mapped;
+        }
+      } catch (err) {
+        console.warn('Webinars query fallback:', err);
+      }
+    }
 
     setToMemoryCache(cacheKey, initialWebinars);
     return initialWebinars;
   },
 
-  // 6. Fetch Assignments
-  async fetchAssignments(): Promise<AssignmentItem[]> {
-    const cacheKey = 'catalog_assignments_v1';
+  async toggleWebinarRsvp(webinarId: string, isRegistering: boolean, currentUser: UserProfile): Promise<void> {
+    if (!existingSupabaseClient) return;
+    try {
+      const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
+      if (!uid) return;
+      if (isRegistering) {
+        await existingSupabaseClient.from('webinar_registrations').upsert({
+          user_id: uid,
+          webinar_id: webinarId,
+        }, { onConflict: 'user_id, webinar_id' });
+      } else {
+        await existingSupabaseClient.from('webinar_registrations').delete().eq('user_id', uid).eq('webinar_id', webinarId);
+      }
+    } catch (e) {
+      console.warn('toggleWebinarRsvp error:', e);
+    }
+  },
+
+  async toggleWebinarLike(webinarId: string, isLiked: boolean, currentUser: UserProfile): Promise<void> {
+    if (!existingSupabaseClient) return;
+    try {
+      const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
+      if (!uid) return;
+      await existingSupabaseClient.from('webinar_registrations').upsert({
+        user_id: uid,
+        webinar_id: webinarId,
+        is_liked: isLiked,
+      }, { onConflict: 'user_id, webinar_id' });
+    } catch (e) {
+      console.warn('toggleWebinarLike error:', e);
+    }
+  },
+
+  async createWebinar(webinar: Partial<WebinarItem>, currentUser: UserProfile): Promise<void> {
+    if (!existingSupabaseClient) return;
+    try {
+      await existingSupabaseClient.from('webinars').insert({
+        id: webinar.id || `webinar-${Date.now()}`,
+        title: webinar.title,
+        speaker: webinar.speaker,
+        date_time: webinar.dateTime || new Date().toISOString(),
+        duration: webinar.duration || '60m',
+        tags: webinar.tags || [],
+        status: webinar.status || 'Upcoming',
+        attendees_count: 1,
+        likes_count: 0,
+        youtube_url: webinar.youtubeUrl,
+        youtube_video_id: webinar.youtubeVideoId,
+        zoom_meeting_url: webinar.zoomMeetingUrl,
+        zoom_meeting_id: webinar.zoomMeetingId,
+        zoom_passcode: webinar.zoomPasscode,
+        key_takeaways: webinar.keyTakeaways || [],
+        category: webinar.category,
+        description: webinar.description,
+        thumbnail: webinar.thumbnail,
+        certificate_eligible: webinar.certificateEligible !== false,
+      });
+    } catch (e) {
+      console.warn('createWebinar error:', e);
+    }
+  },
+
+  // 6. Fetch Assignments from Supabase `assignments` and `assignment_submissions`
+  async fetchAssignments(currentUser?: UserProfile): Promise<AssignmentItem[]> {
+    const cacheKey = `catalog_assignments_${currentUser?.email || 'all'}`;
     const cached = getFromMemoryCache<AssignmentItem[]>(cacheKey);
     if (cached) return cached;
+
+    if (existingSupabaseClient) {
+      try {
+        const { data, error } = await existingSupabaseClient.from('assignments').select('*').limit(50);
+        if (!error && Array.isArray(data) && data.length > 0) {
+          const submissionsMap = new Map<string, any>();
+          if (currentUser) {
+            const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
+            if (uid) {
+              const { data: subs } = await existingSupabaseClient
+                .from('assignment_submissions')
+                .select('*')
+                .eq('user_id', uid);
+              if (Array.isArray(subs)) {
+                for (const s of subs) {
+                  submissionsMap.set(s.assignment_id, s);
+                }
+              }
+            }
+          }
+
+          const mapped: AssignmentItem[] = data.map((a: any) => {
+            const sub = submissionsMap.get(a.id);
+            return {
+              id: a.id,
+              title: a.title,
+              courseOrTopic: a.course_or_topic || a.courseOrTopic || 'Engineering Foundations',
+              difficulty: a.difficulty || 'Medium',
+              dueDate: a.due_date || 'In 4 days',
+              status: sub ? sub.status : 'Pending',
+              score: sub?.score,
+              maxScore: a.max_score || 100,
+              skillsTested: a.skills_tested || [],
+              description: a.description || '',
+              deliverables: a.deliverables || [],
+              rubricCriteria: a.rubric_criteria || [],
+              feedback: sub?.feedback,
+            };
+          });
+          setToMemoryCache(cacheKey, mapped);
+          return mapped;
+        }
+      } catch (err) {
+        console.warn('Assignments query fallback:', err);
+      }
+    }
 
     setToMemoryCache(cacheKey, initialAssignments);
     return initialAssignments;
   },
 
-  // 7. Fetch Industry Tools
-  async fetchIndustryTools(): Promise<IndustryTool[]> {
-    const cacheKey = 'catalog_tools_v1';
+  async submitAssignment(assignmentId: string, submission: { githubRepoUrl: string; notes?: string; score?: number; feedback?: string }, currentUser: UserProfile): Promise<void> {
+    if (!existingSupabaseClient) return;
+    try {
+      const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
+      if (!uid) return;
+      await existingSupabaseClient.from('assignment_submissions').upsert({
+        user_id: uid,
+        assignment_id: assignmentId,
+        status: 'Graded',
+        github_repo_url: submission.githubRepoUrl,
+        submission_content: submission.notes,
+        score: submission.score || 96,
+        feedback: submission.feedback,
+        submitted_at: new Date().toISOString(),
+        graded_at: new Date().toISOString(),
+      }, { onConflict: 'user_id, assignment_id' });
+    } catch (e) {
+      console.warn('submitAssignment error:', e);
+    }
+  },
+
+  // 7. Fetch Industry Tools from Supabase `industry_tools` and `user_tool_progress`
+  async fetchIndustryTools(currentUser?: UserProfile): Promise<IndustryTool[]> {
+    const cacheKey = `catalog_tools_${currentUser?.email || 'all'}`;
     const cached = getFromMemoryCache<IndustryTool[]>(cacheKey);
     if (cached) return cached;
+
+    if (existingSupabaseClient) {
+      try {
+        const { data, error } = await existingSupabaseClient.from('industry_tools').select('*').limit(50);
+        if (!error && Array.isArray(data) && data.length > 0) {
+          const userToolMap = new Map<string, string>();
+          if (currentUser) {
+            const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
+            if (uid) {
+              const { data: progressList } = await existingSupabaseClient
+                .from('user_tool_progress')
+                .select('*')
+                .eq('user_id', uid);
+              if (Array.isArray(progressList)) {
+                for (const p of progressList) {
+                  userToolMap.set(p.tool_id, p.status);
+                }
+              }
+            }
+          }
+
+          const mapped: IndustryTool[] = data.map((t: any) => ({
+            id: t.id,
+            name: t.name,
+            category: t.category,
+            proficiencyRequired: t.proficiency_required || 'Essential',
+            icon: t.icon,
+            description: t.description || '',
+            status: (userToolMap.get(t.id) as any) || 'Not Started',
+            popularFor: t.popular_for || [],
+            cheatSheetUrl: t.cheat_sheet_url,
+            quickTip: t.quick_tip || '',
+            marketDemand: t.market_demand || 90,
+          }));
+          setToMemoryCache(cacheKey, mapped);
+          return mapped;
+        }
+      } catch (err) {
+        console.warn('Industry tools query fallback:', err);
+      }
+    }
 
     setToMemoryCache(cacheKey, initialIndustryTools);
     return initialIndustryTools;
   },
 
-  // 8. Fetch User Roadmap Nodes
+  async updateUserToolProgress(toolId: string, status: 'Not Started' | 'In Progress' | 'Mastered', currentUser: UserProfile): Promise<void> {
+    if (!existingSupabaseClient) return;
+    try {
+      const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
+      if (!uid) return;
+      await existingSupabaseClient.from('user_tool_progress').upsert({
+        user_id: uid,
+        tool_id: toolId,
+        status,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id, tool_id' });
+    } catch (e) {
+      console.warn('updateUserToolProgress error:', e);
+    }
+  },
+
+  // 8. User Roadmap from Supabase `roadmap_nodes` & `user_roadmap_progress`
   async getUserRoadmap(currentUser: UserProfile): Promise<RoadmapNode[]> {
     const cacheKey = `user_roadmap_${currentUser.email || 'anon'}`;
     const cached = getFromMemoryCache<RoadmapNode[]>(cacheKey);
     if (cached) return cached;
+
+    if (existingSupabaseClient) {
+      try {
+        const { data, error } = await existingSupabaseClient
+          .from('roadmap_nodes')
+          .select('*')
+          .order('order_index', { ascending: true });
+
+        if (!error && Array.isArray(data) && data.length > 0) {
+          const userProgressMap = new Map<string, { status: 'completed' | 'current' | 'upcoming'; progress: number }>();
+          const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
+          if (uid) {
+            const { data: progressRows } = await existingSupabaseClient
+              .from('user_roadmap_progress')
+              .select('*')
+              .eq('user_id', uid);
+            if (Array.isArray(progressRows)) {
+              for (const pr of progressRows) {
+                userProgressMap.set(pr.node_id, {
+                  status: pr.status,
+                  progress: pr.progress || 0,
+                });
+              }
+            }
+          }
+
+          const mapped: RoadmapNode[] = data.map((n: any) => {
+            const up = userProgressMap.get(n.id);
+            return {
+              id: n.id,
+              title: n.title,
+              description: n.description || '',
+              status: up?.status || 'upcoming',
+              progress: up ? up.progress : 0,
+              subtopics: n.subtopics || [],
+              recommendedResources: n.recommended_resources || [],
+            };
+          });
+          setToMemoryCache(cacheKey, mapped);
+          return mapped;
+        }
+      } catch (err) {
+        console.warn('Supabase roadmap fetch error:', err);
+      }
+    }
 
     try {
       const stored = localStorage.getItem(getStorageKey('user_roadmap', currentUser));
@@ -1435,13 +2165,119 @@ export const supabaseService = {
     return initialRoadmapNodes;
   },
 
-  // Save User Roadmap Nodes
   async saveUserRoadmap(nodes: RoadmapNode[], currentUser: UserProfile): Promise<void> {
     const cacheKey = `user_roadmap_${currentUser.email || 'anon'}`;
     setToMemoryCache(cacheKey, nodes);
     try {
       localStorage.setItem(getStorageKey('user_roadmap', currentUser), JSON.stringify(nodes));
     } catch (e) {}
+
+    if (!existingSupabaseClient) return;
+    try {
+      const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
+      if (!uid) return;
+      for (const node of nodes) {
+        await existingSupabaseClient.from('user_roadmap_progress').upsert({
+          user_id: uid,
+          node_id: node.id,
+          status: node.status,
+          progress: node.progress,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'user_id, node_id' });
+      }
+    } catch (e) {
+      console.warn('saveUserRoadmap error:', e);
+    }
+  },
+
+  async saveUserRoadmapProgress(nodeId: string, status: string, progress: number, currentUser: UserProfile): Promise<void> {
+    if (!existingSupabaseClient) return;
+    try {
+      const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
+      if (!uid) return;
+      await existingSupabaseClient.from('user_roadmap_progress').upsert({
+        user_id: uid,
+        node_id: nodeId,
+        status,
+        progress,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id, node_id' });
+    } catch (e) {
+      console.warn('saveUserRoadmapProgress error:', e);
+    }
+  },
+
+  // 9. Certificates Persistence in Supabase `certificates` table
+  async saveCertificate(cert: GeneratedCertificate, currentUser: UserProfile): Promise<void> {
+    if (!existingSupabaseClient) return;
+    try {
+      const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
+      if (!uid) return;
+      await existingSupabaseClient.from('certificates').upsert({
+        serial_id: cert.serialId,
+        user_id: uid,
+        type: cert.type,
+        item_id: cert.itemId,
+        title: cert.title,
+        recipient_name: cert.recipientName,
+        recipient_email: cert.recipientEmail || currentUser.email,
+        instructor_or_speaker: cert.instructorOrSpeaker,
+        instructor_role: cert.instructorRole,
+        organization: cert.organization,
+        issue_date: cert.issueDate || new Date().toISOString(),
+        duration_formatted: cert.durationFormatted || '60m',
+        completion_percentage: cert.completionPercentage || 100,
+        watch_time_seconds: cert.watchTimeSeconds || 0,
+        required_watch_time_seconds: cert.requiredWatchTimeSeconds || 0,
+        skills_validated: cert.skillsValidated || [],
+        legal_disclaimer: cert.legalDisclaimer || 'Unofficial completion record.',
+        verification_url: cert.verificationUrl || `https://brainboost.ai/verify/${cert.serialId}`,
+        verification_badge: cert.verificationBadge,
+      }, { onConflict: 'serial_id' });
+    } catch (e) {
+      console.warn('saveCertificate error:', e);
+    }
+  },
+
+  // 10. Safety Scan Report in Supabase `safety_reports` table
+  async saveSafetyReport(report: any, jobOfferText: string, currentUser: UserProfile): Promise<void> {
+    if (!existingSupabaseClient) return;
+    try {
+      const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
+      if (!uid) return;
+      await existingSupabaseClient.from('safety_reports').insert({
+        user_id: uid,
+        job_offer_text: jobOfferText,
+        risk_score: report.riskScore ?? 0,
+        risk_level: report.riskLevel || 'LOW RISK',
+        summary: report.summary || 'Safety analysis completed.',
+        detected_signals: report.detectedSignals || [],
+        recommendation: report.recommendation || '',
+        verification_checklist: report.verificationChecklist || [],
+      });
+    } catch (e) {
+      console.warn('saveSafetyReport error:', e);
+    }
+  },
+
+  // 11. Nebula AI Copilot Message in Supabase `ai_chat_messages` table
+  async saveNebulaMessage(message: ChatMessage, currentUser: UserProfile): Promise<void> {
+    if (!existingSupabaseClient) return;
+    try {
+      const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
+      if (!uid) return;
+      await existingSupabaseClient.from('ai_chat_messages').insert({
+        user_id: uid,
+        role: message.role === 'model' ? 'model' : 'user',
+        content: message.content,
+        model_used: message.modelUsed || 'gemini-3.7-flash',
+        thinking_mode_active: Boolean(message.thinkingModeActive),
+        language: message.language || 'English',
+        mode: message.mode || 'career',
+      });
+    } catch (e) {
+      console.warn('saveNebulaMessage error:', e);
+    }
   },
 };
 

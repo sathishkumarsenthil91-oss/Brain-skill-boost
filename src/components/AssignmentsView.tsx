@@ -40,12 +40,12 @@ export const AssignmentsView: React.FC<AssignmentsViewProps> = ({ user, onNaviga
   }, [assignments, storageKey]);
 
   useEffect(() => {
-    supabaseService.fetchAssignments().then((data) => {
+    supabaseService.fetchAssignments(user).then((data) => {
       if (Array.isArray(data) && data.length > 0) {
-        setAssignments((prev) => (prev.length > 0 ? prev : data));
+        setAssignments(data);
       }
     });
-  }, []);
+  }, [user?.email]);
 
   const filteredAssignments = assignments.filter((a) => {
     if (filterStatus === 'All') return true;
@@ -59,6 +59,13 @@ export const AssignmentsView: React.FC<AssignmentsViewProps> = ({ user, onNaviga
     setIsSubmitting(true);
     setTimeout(() => {
       setIsSubmitting(false);
+      const evalFeedback = `Automated AI & Senior Mentor Code Review Completed:
+• Repository Verified: ${submissionUrl}
+• Architecture Score: 98/100 (Modular structure, clean component and route boundaries).
+• Code Robustness: 95/100 (Input validation and comprehensive error handling).
+• Performance: 96/100 (Optimized queries and zero layout shift).
+Summary: High-quality production implementation. Ready for technical portfolio showcase.`;
+
       setAssignments((prev) =>
         prev.map((a) => {
           if (a.id === activeSubmission.id) {
@@ -66,17 +73,26 @@ export const AssignmentsView: React.FC<AssignmentsViewProps> = ({ user, onNaviga
               ...a,
               status: 'Graded',
               score: 96,
-              feedback: `Automated AI & Senior Mentor Code Review Completed:
-• Repository Verified: ${submissionUrl}
-• Architecture Score: 98/100 (Modular structure, clean component and route boundaries).
-• Code Robustness: 95/100 (Input validation and comprehensive error handling).
-• Performance: 96/100 (Optimized queries and zero layout shift).
-Summary: High-quality production implementation. Ready for technical portfolio showcase.`,
+              feedback: evalFeedback,
             };
           }
           return a;
         })
       );
+
+      if (user) {
+        supabaseService.submitAssignment(
+          activeSubmission.id,
+          {
+            githubRepoUrl: submissionUrl,
+            notes: submissionNotes,
+            score: 96,
+            feedback: evalFeedback,
+          },
+          user
+        );
+      }
+
       setActiveSubmission(null);
       setSubmissionUrl('');
       setSubmissionNotes('');

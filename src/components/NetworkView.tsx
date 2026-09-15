@@ -262,6 +262,8 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
       });
     }
 
+    connectivityService.toggleFollow(targetUser.id, user);
+
     // Update current user following count
     if (onUpdateUser) {
       const delta = newFollowingStatus ? 1 : -1;
@@ -278,6 +280,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
     const req = followRequests.find((r) => r.id === reqId);
     if (!req) return;
     setFollowRequests((prev) => prev.filter((r) => r.id !== reqId));
+    connectivityService.respondToAccessRequest(reqId, 'approved', user);
     if (onUpdateUser) {
       onUpdateUser({
         followersCount: (user.followersCount ?? 428) + 1,
@@ -288,6 +291,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
 
   const handleDeclineFollowRequest = (reqId: string) => {
     setFollowRequests((prev) => prev.filter((r) => r.id !== reqId));
+    connectivityService.respondToAccessRequest(reqId, 'declined', user);
     showToast('Declined follow request');
   };
 
@@ -303,6 +307,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
         return p;
       })
     );
+    connectivityService.toggleLike(postId, user);
   };
 
   // Repost / Share
@@ -378,6 +383,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
     );
 
     setCommentInputMap((prev) => ({ ...prev, [postId]: '' }));
+    connectivityService.addComment(postId, text, user);
     showToast('Comment posted!');
   };
 
@@ -432,6 +438,13 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
     };
 
     setPosts([newPost, ...posts]);
+    connectivityService.createPost(user, {
+      content: newPost.content,
+      imageUrl: newPost.imageUrl,
+      codeSnippet: newPost.codeSnippet,
+      attachedCertificate: newPost.attachedCertificate,
+      tags: newPost.tags,
+    });
     setShowCreatePostModal(false);
     setNewPostContent('');
     setNewPostTags('#WebDev #SoftwareEngineering');

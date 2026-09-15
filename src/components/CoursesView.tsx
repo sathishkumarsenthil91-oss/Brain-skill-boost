@@ -64,12 +64,17 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
   const [courses, setCourses] = useState<CourseItem[]>(initialCourses);
 
   useEffect(() => {
-    supabaseService.fetchCourses().then((data) => {
+    supabaseService.fetchCourses(user).then((data) => {
       if (Array.isArray(data) && data.length > 0) {
         setCourses(data);
       }
     });
-  }, []);
+    supabaseService.fetchYouTubeTracks(user).then((tracks) => {
+      if (Array.isArray(tracks) && tracks.length > 0) {
+        setYoutubeTracks(tracks);
+      }
+    });
+  }, [user.email]);
   const [activeCategory, setActiveCategory] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedCourse, setSelectedCourse] = useState<CourseItem | null>(null);
@@ -77,6 +82,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
   const [certToast, setCertToast] = useState<string | null>(null);
 
   const handleCertificateClaimed = (cert: GeneratedCertificate) => {
+    supabaseService.saveCertificate(cert, user);
     if (onUpdateUser) {
       const existingCerts = user.earnedCertificates || [];
       const updated = [...existingCerts.filter((c) => c.serialId !== cert.serialId), cert];
@@ -160,6 +166,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
       const updated = [newTrack, ...youtubeTracks];
       setYoutubeTracks(updated);
       saveUserTracks(user.email || 'default', updated);
+      supabaseService.saveYouTubeTrack(newTrack, user);
       setPastedUrl('');
       setActivePlayerTrack(newTrack);
     } catch (err: any) {
@@ -186,6 +193,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
       const updated = [fallbackTrack, ...youtubeTracks];
       setYoutubeTracks(updated);
       saveUserTracks(user.email || 'default', updated);
+      supabaseService.saveYouTubeTrack(fallbackTrack, user);
       setPastedUrl('');
       setActivePlayerTrack(fallbackTrack);
     } finally {
@@ -222,6 +230,8 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
       return nextList;
     });
 
+    supabaseService.saveYouTubeTrack(updatedTrack, user);
+
     // Sync learning record to user profile safely outside of setYoutubeTracks updater
     if (updatedTrack.learningRecord && onUpdateUser) {
       const records = user.learningRecords || [];
@@ -253,18 +263,19 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
   });
 
   const handleEnrollToggle = (courseId: string) => {
+    let nextStatus = false;
     setCourses((prev) =>
       prev.map((c) => {
         if (c.id === courseId) {
           const currentEnrolled = c.isEnrolled ?? c.enrolled;
-          const newStatus = !currentEnrolled;
+          nextStatus = !currentEnrolled;
           const updatedCourse = {
             ...c,
-            enrolled: newStatus,
-            isEnrolled: newStatus,
-            progress: newStatus ? (c.progress > 0 ? c.progress : 5) : 0,
+            enrolled: nextStatus,
+            isEnrolled: nextStatus,
+            progress: nextStatus ? (c.progress > 0 ? c.progress : 5) : 0,
           };
-          if (newStatus) {
+          if (nextStatus) {
             setSelectedCourseForPlayer(updatedCourse);
           }
           return updatedCourse;
@@ -272,6 +283,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
         return c;
       })
     );
+    supabaseService.enrollInCourse(courseId, nextStatus, user);
   };
 
   const handleUpdatePlatformCourse = (updatedCourse: CourseItem) => {
@@ -281,6 +293,12 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
     if (selectedCourseForPlayer && selectedCourseForPlayer.id === updatedCourse.id) {
       setSelectedCourseForPlayer(updatedCourse);
     }
+    supabaseService.updateCourseProgress(
+      updatedCourse.id,
+      updatedCourse.progress || 0,
+      (updatedCourse as any).completedLessons || [],
+      user
+    );
   };
 
   return (

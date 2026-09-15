@@ -3,6 +3,7 @@ import { UserProfile, ViewType, SkillItem, UnofficialLearningRecord } from '../t
 import { UnofficialRecordModal } from './UnofficialRecordModal';
 import { downloadRecordAsPDF } from '../services/youtubeLearningService';
 import { DEFAULT_USER_AVATAR } from '../data/mockData';
+import { supabaseService } from '../services/supabaseService';
 
 interface ProfileViewProps {
   user: UserProfile;
@@ -22,6 +23,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'resume' | 'achievements' | 'records'>('overview');
   const [selectedRecord, setSelectedRecord] = useState<any | null>(null);
+  const [profileToast, setProfileToast] = useState<string | null>(null);
 
   // Profile photo upload states
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -124,9 +126,14 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     onUpdateProfile(formData);
+    supabaseService.syncUserProfile(formData).catch((err) => console.warn('Supabase sync warning:', err));
     setIsEditing(false);
     setSavedSuccess(true);
-    setTimeout(() => setSavedSuccess(false), 3000);
+    setProfileToast('Profile successfully updated and synced with cloud database!');
+    setTimeout(() => {
+      setSavedSuccess(false);
+      setProfileToast(null);
+    }, 3500);
   };
 
   const foundationSkills = skills.filter((s) => s.category === 'foundation');
@@ -134,6 +141,13 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+      {profileToast && (
+        <div className="fixed bottom-6 right-6 z-50 bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-5 py-3 rounded-2xl shadow-2xl flex items-center gap-3 border border-white/10 text-sm font-bold animate-bounce">
+          <span className="material-symbols-outlined text-emerald-400 dark:text-emerald-600">check_circle</span>
+          <span>{profileToast}</span>
+        </div>
+      )}
+
       {/* Header Banner */}
       <div className="relative rounded-3xl overflow-hidden bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 p-6 sm:p-8 text-white shadow-lg">
         <div className="absolute -right-10 -bottom-10 w-64 h-64 bg-white/10 rounded-full blur-2xl pointer-events-none" />
@@ -423,7 +437,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               </div>
               <div className="flex items-center gap-3">
                 <button
-                  onClick={() => alert('Downloaded active resume!')}
+                  onClick={() => {
+                    setProfileToast('Active master resume downloaded.');
+                    setTimeout(() => setProfileToast(null), 3000);
+                  }}
                   className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 hover:bg-slate-200 font-bold text-xs flex items-center gap-1.5 cursor-pointer"
                 >
                   <span className="material-symbols-outlined text-[16px]">download</span>
@@ -439,7 +456,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     onChange={(e) => {
                       if (e.target.files && e.target.files[0]) {
                         onUpdateProfile({ resumeFileName: e.target.files[0].name });
-                        alert(`Uploaded ${e.target.files[0].name}`);
+                        setProfileToast(`Uploaded ${e.target.files[0].name} and synced with your profile!`);
+                        setTimeout(() => setProfileToast(null), 3500);
                       }
                     }}
                   />

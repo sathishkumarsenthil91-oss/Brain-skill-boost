@@ -31,12 +31,12 @@ export const WebinarsView: React.FC<WebinarsViewProps> = ({
   });
 
   useEffect(() => {
-    supabaseService.fetchWebinars().then((data) => {
+    supabaseService.fetchWebinars(user).then((data) => {
       if (Array.isArray(data) && data.length > 0) {
         setWebinars(data);
       }
     });
-  }, []);
+  }, [user.email]);
   const [filterType, setFilterType] = useState<'All' | 'Upcoming' | 'Live' | 'Recorded'>('All');
   const [selectedWebinar, setSelectedWebinar] = useState<WebinarItem | null>(null);
   const [activePlayerWebinar, setActivePlayerWebinar] = useState<WebinarItem | null>(null);
@@ -86,23 +86,26 @@ export const WebinarsView: React.FC<WebinarsViewProps> = ({
   };
 
   const handleRsvp = (webinarId: string) => {
+    let nextRegistered = false;
     const updated = webinars.map((w) => {
       if (w.id === webinarId) {
-        const newRegistered = !w.isRegistered;
-        const newCount = newRegistered ? w.attendeesCount + 1 : w.attendeesCount - 1;
-        showToast(newRegistered ? `RSVP Confirmed for "${w.title}"! Zoom link & Calendar invite sent.` : `RSVP Cancelled.`);
-        return { ...w, isRegistered: newRegistered, registered: newRegistered, attendeesCount: newCount };
+        nextRegistered = !w.isRegistered;
+        const newCount = nextRegistered ? w.attendeesCount + 1 : w.attendeesCount - 1;
+        showToast(nextRegistered ? `RSVP Confirmed for "${w.title}"! Zoom link & Calendar invite sent.` : `RSVP Cancelled.`);
+        return { ...w, isRegistered: nextRegistered, registered: nextRegistered, attendeesCount: newCount };
       }
       return w;
     });
     saveWebinars(updated);
+    supabaseService.toggleWebinarRsvp(webinarId, nextRegistered, user);
   };
 
   const handleToggleLike = (webinarId: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
+    let nextLiked = false;
     const updated = webinars.map((w) => {
       if (w.id === webinarId) {
-        const nextLiked = !w.isLiked;
+        nextLiked = !w.isLiked;
         const nextLikesCount = nextLiked ? (w.likesCount || 0) + 1 : Math.max(0, (w.likesCount || 1) - 1);
         if (nextLiked) {
           showToast(`You liked "${w.title}"! ❤️`);
@@ -112,6 +115,7 @@ export const WebinarsView: React.FC<WebinarsViewProps> = ({
       return w;
     });
     saveWebinars(updated);
+    supabaseService.toggleWebinarLike(webinarId, nextLiked, user);
   };
 
   const handleCopyZoomCreds = (meetingId?: string, passcode?: string) => {
@@ -183,6 +187,7 @@ export const WebinarsView: React.FC<WebinarsViewProps> = ({
 
     const updated = [newWebinar, ...webinars];
     saveWebinars(updated);
+    supabaseService.createWebinar(newWebinar, user);
     setShowHostModal(false);
     showToast(`🎉 "${newWebinar.title}" is now hosted and live on the network!`);
     setFilterType('All');
@@ -198,28 +203,31 @@ export const WebinarsView: React.FC<WebinarsViewProps> = ({
       })
     );
 
+    const newCert: GeneratedCertificate = {
+      id: `cert-${claimedCert.certificateId}`,
+      serialId: claimedCert.certificateId,
+      type: 'webinar',
+      itemId: claimedCert.webinarId,
+      title: claimedCert.webinarTitle,
+      recipientName: claimedCert.recipientName || user.name || 'Learner',
+      recipientEmail: user.email || 'learner@brainboost.ai',
+      instructorOrSpeaker: claimedCert.speakerName,
+      instructorRole: claimedCert.speakerRole,
+      organization: claimedCert.speakerCompany || 'Brainboost',
+      issueDate: claimedCert.issueDate,
+      durationFormatted: claimedCert.duration || '60m',
+      completionPercentage: 100,
+      watchTimeSeconds: 3600,
+      requiredWatchTimeSeconds: 3600,
+      skillsValidated: claimedCert.tags || ['Live System Design', 'Tech Architecture'],
+      legalDisclaimer:
+        'This document certifies completion of non-accredited online learning activities. Brainboost and affiliated mentors are not officially affiliated with or endorsed by referenced third-party platforms.',
+      verificationUrl: claimedCert.verificationUrl || `https://brainboost.ai/verify/${claimedCert.certificateId}`,
+    };
+
+    supabaseService.saveCertificate(newCert, user);
+
     if (onUpdateUser) {
-      const newCert: GeneratedCertificate = {
-        id: `cert-${claimedCert.certificateId}`,
-        serialId: claimedCert.certificateId,
-        type: 'webinar',
-        itemId: claimedCert.webinarId,
-        title: claimedCert.webinarTitle,
-        recipientName: claimedCert.recipientName || user.name || 'Learner',
-        recipientEmail: user.email || 'learner@brainboost.ai',
-        instructorOrSpeaker: claimedCert.speakerName,
-        instructorRole: claimedCert.speakerRole,
-        organization: claimedCert.speakerCompany || 'Brainboost',
-        issueDate: claimedCert.issueDate,
-        durationFormatted: claimedCert.duration || '60m',
-        completionPercentage: 100,
-        watchTimeSeconds: 3600,
-        requiredWatchTimeSeconds: 3600,
-        skillsValidated: claimedCert.tags || ['Live System Design', 'Tech Architecture'],
-        legalDisclaimer:
-          'This document certifies completion of non-accredited online learning activities. Brainboost and affiliated mentors are not officially affiliated with or endorsed by referenced third-party platforms.',
-        verificationUrl: claimedCert.verificationUrl || `https://brainboost.ai/verify/${claimedCert.certificateId}`,
-      };
       const existing = user.earnedCertificates || [];
       const updated = [...existing.filter((c) => c.serialId !== newCert.serialId), newCert];
       onUpdateUser({
