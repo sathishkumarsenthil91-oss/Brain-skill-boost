@@ -12,6 +12,24 @@ const json = (body: unknown, status = 200) =>
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const extractResponseText = (payload: any): string => {
+  const direct = typeof payload?.output_text === "string" ? payload.output_text.trim() : "";
+  if (direct) return direct;
+
+  const parts: string[] = [];
+  if (Array.isArray(payload?.output)) {
+    for (const item of payload.output) {
+      if (!item || item.type !== "message" || !Array.isArray(item.content)) continue;
+      for (const part of item.content) {
+        if (part?.type === "output_text" && typeof part.text === "string") {
+          parts.push(part.text);
+        }
+      }
+    }
+  }
+  return parts.join("").trim();
+};
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -174,11 +192,19 @@ Deno.serve(async (req: Request) => {
       return json({ error, providerStatus, providerCode, providerRequestId }, 502);
     }
 
-    const content = String(aiPayload?.output_text || "").trim();
+    let content = extractResponseText(aiPayload);
+
+    if (!content && aiPayload?.status === "incomplete") {
+      const reason = String(aiPayload?.incomplete_details?.reason || "unknown");
+      console.error("OpenAI response incomplete", { reason, id: aiPayload?.id });
+      return json({ error: "AI response was incomplete", providerReason: reason }, 502);
+    }
+
     if (!content) {
-      console.error("OpenAI returned no output_text", {
+      console.error("OpenAI returned no text content", {
         status: aiPayload?.status,
         id: aiPayload?.id,
+        outputTypes: Array.isArray(aiPayload?.output) ? aiPayload.output.map((item: any) => item?.type) : [],
       });
       return json({ error: "AI provider returned an empty response" }, 502);
     }
