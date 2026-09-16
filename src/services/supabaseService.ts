@@ -18,7 +18,6 @@ import {
   AssignmentItem,
   IndustryTool,
   YouTubeLearningTrack,
-  ChatMessage,
 } from '../types';
 import {
   initialCourses,
@@ -180,54 +179,11 @@ export function mapProfileToNetworkUser(user: UserProfile, libraryItems?: UserLi
 /**
  * Resolves user's unique UUID in Supabase database from session or profile email lookup
  */
-export async function resolveUserUuid(client: any, user?: UserProfile): Promise<string | null> {
+export async function resolveUserUuid(client: any, _user?: UserProfile): Promise<string | null> {
   if (!client) return null;
-  try {
-    const { data: sessionData } = await client.auth.getSession();
-    if (sessionData?.session?.user?.id) {
-      return sessionData.session.user.id;
-    }
-  } catch {}
-
-  const email = user?.email?.trim().toLowerCase();
-  if (!email) return null;
-
-  try {
-    const { data: profile } = await client
-      .from('profiles')
-      .select('id')
-      .eq('email', email)
-      .maybeSingle();
-
-    if (profile?.id) {
-      return profile.id;
-    }
-
-    // Auto-create profile in Supabase if it doesn't exist
-    if (user) {
-      const { data: newProfile, error } = await client
-        .from('profiles')
-        .insert({
-          email,
-          name: user.name || user.email.split('@')[0],
-          target_role: user.targetRole || 'Full Stack Engineer',
-          degree: user.degree || 'B.Tech Computer Science',
-          college: user.college || 'Tech Institute',
-          grad_year: user.gradYear || '2026',
-          avatar_url: user.avatarUrl,
-          overall_readiness: user.overallReadiness || 65,
-        })
-        .select('id')
-        .maybeSingle();
-
-      if (!error && newProfile?.id) {
-        return newProfile.id;
-      }
-    }
-  } catch (err) {
-    console.warn('resolveUserUuid error:', err);
-  }
-  return null;
+  const { data: { session }, error } = await client.auth.getSession();
+  if (error || !session) throw new Error('Please sign in again to save your changes.');
+  return session.user.id;
 }
 
 /**
@@ -276,8 +232,11 @@ export const connectivityService = {
         user.username ||
         (user.email ? `@${user.email.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '_')}` : '@developer');
       const cleanUsername = handle.replace(/^@/, '');
+      const uid = await resolveUserUuid(existingSupabaseClient, user);
+      if (!uid) return;
 
       const profilePayload: any = {
+        id: uid, username: cleanUsername, user_id_handle: handle,
         email: user.email.toLowerCase().trim(),
         name: user.name || user.email.split('@')[0],
         avatar_url:
@@ -304,7 +263,7 @@ export const connectivityService = {
       }
 
       const { data: upsertedProfile } = await existingSupabaseClient.from('profiles').upsert(profilePayload, {
-        onConflict: 'email',
+        onConflict: 'id',
       }).select('id').maybeSingle();
 
       const profileId = profilePayload.id || upsertedProfile?.id;
@@ -379,8 +338,11 @@ export const connectivityService = {
       // Sync to Supabase
       if (existingSupabaseClient && user.email) {
         const cleanUsername = data.userId.replace(/^@/, '');
+        const uid = await resolveUserUuid(existingSupabaseClient, user);
+        if (!uid) return;
         await existingSupabaseClient.from('profiles').upsert(
           {
+            id: uid, username: cleanUsername, user_id_handle: data.userId, connectivity_setup_completed: true,
             email: user.email.toLowerCase().trim(),
             name: data.name,
             avatar_url: data.avatarUrl,
@@ -388,7 +350,7 @@ export const connectivityService = {
             bio: data.bio || user.bio,
             updated_at: new Date().toISOString(),
           },
-          { onConflict: 'email' }
+          { onConflict: 'id' }
         );
       }
     } catch (e) {
@@ -434,7 +396,7 @@ export const connectivityService = {
               allFollows = followsData;
             } else {
               const { data: ufData } = await existingSupabaseClient
-                .from('user_follows')
+                .from('network_follows')
                 .select('follower_id, following_id');
               if (Array.isArray(ufData)) allFollows = ufData;
             }
@@ -485,8 +447,6 @@ export const connectivityService = {
 
     if (existingSupabaseClient) {
       try {
-        // Sync self first
-        await this.syncUserProfileToSupabase(currentUser);
         const myUid = await resolveUserUuid(existingSupabaseClient, currentUser);
 
         const { data, error } = await existingSupabaseClient
@@ -496,48 +456,17 @@ export const connectivityService = {
           .limit(100);
 
         if (!error && Array.isArray(data)) {
-          // Fetch live follows from database
-          let allFollows: { follower_id: string; following_id: string }[] = [];
-          try {
-            const { data: followsData } = await existingSupabaseClient
-              .from('network_follows')
-              .select('follower_id, following_id');
-            if (Array.isArray(followsData)) {
-              allFollows = followsData;
-            } else {
-              const { data: ufData } = await existingSupabaseClient
-                .from('user_follows')
-                .select('follower_id, following_id');
-              if (Array.isArray(ufData)) allFollows = ufData;
-            }
-          } catch (fErr) {
-            console.warn('Follows query note:', fErr);
-          }
+          const peers = data.filter((row: any) => row.email?.toLowerCase().trim() !== currentEmail);
+          const mapped = peers.map((row: any) => mapRowToNetworkUser(row, currentMapped.id));
 
-          const peers = data.filter((row: any) => {
-            if (myUid && row.id === myUid) return false;
-            if (currentEmail && row.email?.toLowerCase().trim() === currentEmail) return false;
-            return true;
-          });
-
-          const finalUsers: NetworkUser[] = peers.map((row: any) => {
-            const baseUser = mapRowToNetworkUser(row, myUid || currentMapped.id);
-            const targetId = row.id;
-
-            const isFollowing = myUid ? allFollows.some((f) => f.follower_id === myUid && f.following_id === targetId) : false;
-            const isFollower = myUid ? allFollows.some((f) => f.follower_id === targetId && f.following_id === myUid) : false;
-            const isFriend = Boolean(isFollowing && isFollower);
-            const liveFollowersCount = allFollows.filter((f) => f.following_id === targetId).length;
-            const liveFollowingCount = allFollows.filter((f) => f.follower_id === targetId).length;
-
-            return {
-              ...baseUser,
-              followersCount: liveFollowersCount,
-              followingCount: liveFollowingCount,
-              isFollowing,
-              isFollower,
-              isFriend,
-            };
+          const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
+          const { data: follows, error: followError } = await existingSupabaseClient.from('network_follows').select('follower_id,following_id,status')
+            .or(`follower_id.eq.${uid},following_id.eq.${uid}`);
+          if (followError) throw followError;
+          const finalUsers = mapped.map(u => {
+            const following = (follows || []).some(f => f.follower_id === uid && f.following_id === u.id && f.status === 'approved');
+            const follower = (follows || []).some(f => f.following_id === uid && f.follower_id === u.id && f.status === 'approved');
+            return { ...u, isFollowing: following, isFollower: follower, isFriend: following && follower };
           });
 
           this.saveLocalUsers(finalUsers, currentUser);
@@ -553,123 +482,27 @@ export const connectivityService = {
 
   // Get live list of followers for any user from the database
   async getFollowersList(userId: string, currentUser: UserProfile): Promise<NetworkUser[]> {
-    if (!existingSupabaseClient) return [];
-    try {
-      const myUid = await resolveUserUuid(existingSupabaseClient, currentUser);
-      const targetUid = (await resolveTargetUuid(existingSupabaseClient, userId)) || userId;
-
-      let followerIds: string[] = [];
-      const { data: nfData } = await existingSupabaseClient
-        .from('network_follows')
-        .select('follower_id')
-        .eq('following_id', targetUid);
-
-      if (Array.isArray(nfData)) {
-        followerIds = nfData.map((r: any) => r.follower_id);
-      } else {
-        const { data: ufData } = await existingSupabaseClient
-          .from('user_follows')
-          .select('follower_id')
-          .eq('following_id', targetUid);
-        if (Array.isArray(ufData)) followerIds = ufData.map((r: any) => r.follower_id);
-      }
-
-      if (followerIds.length === 0) return [];
-
-      const { data: profiles, error } = await existingSupabaseClient
-        .from('profiles')
-        .select('*')
-        .in('id', followerIds);
-
-      if (error || !Array.isArray(profiles)) return [];
-
-      let allFollows: { follower_id: string; following_id: string }[] = [];
-      const { data: afData } = await existingSupabaseClient
-        .from('network_follows')
-        .select('follower_id, following_id');
-      if (Array.isArray(afData)) allFollows = afData;
-
-      return profiles.map((p: any) => {
-        const mapped = mapRowToNetworkUser(p, myUid || 'current-user');
-        const isFollowing = myUid ? allFollows.some((f) => f.follower_id === myUid && f.following_id === p.id) : false;
-        const isFollower = myUid ? allFollows.some((f) => f.follower_id === p.id && f.following_id === myUid) : false;
-        const followersCount = allFollows.filter((f) => f.following_id === p.id).length;
-        const followingCount = allFollows.filter((f) => f.follower_id === p.id).length;
-        return {
-          ...mapped,
-          isFollowing,
-          isFollower,
-          isFriend: Boolean(isFollowing && isFollower),
-          followersCount,
-          followingCount,
-        };
-      });
-    } catch (err) {
-      console.warn('getFollowersList error:', err);
-      return [];
-    }
+    const uid = await resolveTargetUuid(existingSupabaseClient, userId);
+    if (!uid) return [];
+    const { data: rows } = await existingSupabaseClient.from('network_follows').select('follower_id')
+      .eq('following_id', uid).eq('status', 'approved').throwOnError();
+    const ids = (rows || []).map(row => row.follower_id);
+    if (!ids.length) return [];
+    const { data: profiles } = await existingSupabaseClient.from('profiles').select('*').in('id', ids).throwOnError();
+    return (profiles || []).map(row => mapRowToNetworkUser(row, currentUser.id));
   },
 
-  // Get live list of following for any user from the database
   async getFollowingList(userId: string, currentUser: UserProfile): Promise<NetworkUser[]> {
-    if (!existingSupabaseClient) return [];
-    try {
-      const myUid = await resolveUserUuid(existingSupabaseClient, currentUser);
-      const targetUid = (await resolveTargetUuid(existingSupabaseClient, userId)) || userId;
-
-      let followingIds: string[] = [];
-      const { data: nfData } = await existingSupabaseClient
-        .from('network_follows')
-        .select('following_id')
-        .eq('follower_id', targetUid);
-
-      if (Array.isArray(nfData)) {
-        followingIds = nfData.map((r: any) => r.following_id);
-      } else {
-        const { data: ufData } = await existingSupabaseClient
-          .from('user_follows')
-          .select('following_id')
-          .eq('follower_id', targetUid);
-        if (Array.isArray(ufData)) followingIds = ufData.map((r: any) => r.following_id);
-      }
-
-      if (followingIds.length === 0) return [];
-
-      const { data: profiles, error } = await existingSupabaseClient
-        .from('profiles')
-        .select('*')
-        .in('id', followingIds);
-
-      if (error || !Array.isArray(profiles)) return [];
-
-      let allFollows: { follower_id: string; following_id: string }[] = [];
-      const { data: afData } = await existingSupabaseClient
-        .from('network_follows')
-        .select('follower_id, following_id');
-      if (Array.isArray(afData)) allFollows = afData;
-
-      return profiles.map((p: any) => {
-        const mapped = mapRowToNetworkUser(p, myUid || 'current-user');
-        const isFollowing = myUid ? allFollows.some((f) => f.follower_id === myUid && f.following_id === p.id) : false;
-        const isFollower = myUid ? allFollows.some((f) => f.follower_id === p.id && f.following_id === myUid) : false;
-        const followersCount = allFollows.filter((f) => f.following_id === p.id).length;
-        const followingCount = allFollows.filter((f) => f.follower_id === p.id).length;
-        return {
-          ...mapped,
-          isFollowing,
-          isFollower,
-          isFriend: Boolean(isFollowing && isFollower),
-          followersCount,
-          followingCount,
-        };
-      });
-    } catch (err) {
-      console.warn('getFollowingList error:', err);
-      return [];
-    }
+    const uid = await resolveTargetUuid(existingSupabaseClient, userId);
+    if (!uid) return [];
+    const { data: rows } = await existingSupabaseClient.from('network_follows').select('following_id')
+      .eq('follower_id', uid).eq('status', 'approved').throwOnError();
+    const ids = (rows || []).map(row => row.following_id);
+    if (!ids.length) return [];
+    const { data: profiles } = await existingSupabaseClient.from('profiles').select('*').in('id', ids).throwOnError();
+    return (profiles || []).map(row => mapRowToNetworkUser(row, currentUser.id));
   },
 
-  // Synchronous getter for immediate render from cache
   getUsers(currentUser: UserProfile): NetworkUser[] {
     return this.getLocalUsers(currentUser);
   },
@@ -882,9 +715,9 @@ export const connectivityService = {
       resolveUserUuid(existingSupabaseClient, currentUser).then((uid) => {
         if (!uid) return;
         if (targetPost?.isLiked) {
-          existingSupabaseClient.from('post_likes').upsert({ post_id: postId, user_id: uid }, { onConflict: 'user_id, post_id' }).then(() => {});
+          existingSupabaseClient.from('network_post_likes').upsert({ post_id: postId, user_id: uid }, { onConflict: 'user_id, post_id' }).then(() => {});
         } else {
-          existingSupabaseClient.from('post_likes').delete().eq('post_id', postId).eq('user_id', uid).then(() => {});
+          existingSupabaseClient.from('network_post_likes').delete().eq('post_id', postId).eq('user_id', uid).then(() => {});
         }
       }).catch((err) => console.warn('Supabase toggleLike notice:', err));
     }
@@ -921,7 +754,7 @@ export const connectivityService = {
     if (existingSupabaseClient) {
       resolveUserUuid(existingSupabaseClient, currentUser).then((uid) => {
         if (!uid) return;
-        existingSupabaseClient.from('post_comments').insert({
+        existingSupabaseClient.from('network_post_comments').insert({
           post_id: postId,
           author_id: uid,
           content,
@@ -961,64 +794,12 @@ export const connectivityService = {
 
   // Fetch remote chat messages between current user and target user from Supabase
   async fetchMessagesForUser(participantId: string, currentUser: UserProfile): Promise<NetworkMessage[]> {
-    if (!existingSupabaseClient) return [];
-    try {
-      const myUid = await resolveUserUuid(existingSupabaseClient, currentUser);
-      const targetUid = (await resolveTargetUuid(existingSupabaseClient, participantId)) || participantId;
-      if (!myUid || !targetUid) return [];
-
-      let dbMessages: any[] = [];
-      const { data: nmData } = await existingSupabaseClient
-        .from('network_messages')
-        .select('*')
-        .or(`and(sender_id.eq.${myUid},receiver_id.eq.${targetUid}),and(sender_id.eq.${targetUid},receiver_id.eq.${myUid})`)
-        .order('created_at', { ascending: true })
-        .limit(150);
-
-      if (Array.isArray(nmData) && nmData.length > 0) {
-        dbMessages = nmData;
-      } else {
-        const { data: mData } = await existingSupabaseClient
-          .from('messages')
-          .select('*')
-          .or(`and(sender_id.eq.${myUid},receiver_id.eq.${targetUid}),and(sender_id.eq.${targetUid},receiver_id.eq.${myUid})`)
-          .order('created_at', { ascending: true })
-          .limit(150);
-        if (Array.isArray(mData)) dbMessages = mData;
-      }
-
-      if (dbMessages.length > 0) {
-        const mapped: NetworkMessage[] = dbMessages.map((row: any) => ({
-          id: row.id || `msg-${row.created_at}`,
-          senderId: row.sender_id === myUid ? 'current-user-real' : row.sender_id,
-          receiverId: row.receiver_id,
-          content: row.content,
-          timestamp: row.created_at
-            ? new Date(row.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            : 'Recently',
-          isRead: Boolean(row.is_read),
-        }));
-
-        // Merge with local storage
-        const convs = this.getConversations(currentUser);
-        const existingConv = convs.find((c) => c.participant.id === participantId);
-        if (existingConv) {
-          existingConv.messages = mapped;
-          if (mapped.length > 0) {
-            existingConv.lastMessage = mapped[mapped.length - 1].content;
-            existingConv.lastMessageTime = mapped[mapped.length - 1].timestamp;
-          }
-        }
-        this.saveConversations(convs, currentUser);
-        return mapped;
-      }
-    } catch (err) {
-      console.warn('fetchMessagesForUser error:', err);
-    }
-    return [];
+    const participantUid = await resolveTargetUuid(existingSupabaseClient, participantId);
+    if (!participantUid) return [];
+    const conversations = await this.fetchConversations(currentUser);
+    return conversations.find(conversation => conversation.participant.id === participantUid)?.messages || [];
   },
 
-  // Send real-time chat message with broadcast & Supabase sync
   async sendMessage(
     participant: NetworkUser,
     content: string,
@@ -1038,56 +819,23 @@ export const connectivityService = {
       isRead: true,
     };
 
-    // 1. Send via Supabase Realtime broadcast and database table insert
-    if (existingSupabaseClient) {
-      try {
-        const senderUuid = await resolveUserUuid(existingSupabaseClient, currentUser);
-        const targetUuid = (await resolveTargetUuid(existingSupabaseClient, participant.id)) || participant.id;
-
-        const globalChannel = existingSupabaseClient.channel('public:global_realtime_chat');
-        await globalChannel.send({
-          type: 'broadcast',
-          event: 'chat_message',
-          payload: {
-            ...newMsg,
-            senderUuid,
-            targetUuid,
-            senderName: currentMapped.name,
-            senderAvatar: currentMapped.avatarUrl,
-            createdAt: nowIso,
-          },
-        });
-
-        // Insert into network_messages and messages tables
-        if (senderUuid && targetUuid) {
-          try {
-            await existingSupabaseClient.from('network_messages').insert({
-              sender_id: senderUuid,
-              receiver_id: targetUuid,
-              content,
-              is_read: false,
-              created_at: nowIso,
-            });
-          } catch (nmErr) {
-            console.warn('Insert to network_messages notice:', nmErr);
-          }
-
-          try {
-            await existingSupabaseClient.from('messages').insert({
-              sender_id: senderUuid,
-              receiver_id: targetUuid,
-              content,
-              is_read: false,
-              created_at: nowIso,
-            });
-          } catch (mErr) {
-            console.warn('Insert to messages notice:', mErr);
-          }
-        }
-      } catch (err) {
-        console.warn('Supabase Realtime message dispatch note:', err);
-      }
-    }
+    const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
+    if (!uid || !/^[0-9a-f-]{36}$/i.test(participant.id)) throw new Error('Choose a registered user to send a message.');
+    const [one, two] = [uid, participant.id].sort();
+    if (one === two) throw new Error('Choose another user to send a message.');
+    await existingSupabaseClient.from('network_conversations').upsert({
+      participant_one_id: one, participant_two_id: two,
+    }, { onConflict: 'participant_one_id,participant_two_id', ignoreDuplicates: true }).throwOnError();
+    const { data: conversation } = await existingSupabaseClient.from('network_conversations').select('id')
+      .eq('participant_one_id', one).eq('participant_two_id', two).single().throwOnError();
+    const { data: stored } = await existingSupabaseClient.from('network_messages').insert({
+      conversation_id: conversation.id, sender_id: uid, receiver_id: participant.id,
+      content, is_read: false,
+    }).select('id').single().throwOnError();
+    newMsg.id = stored.id;
+    newMsg.senderId = uid;
+    await existingSupabaseClient.from('network_conversations').update({ last_message: content, last_message_time: nowIso })
+      .eq('id', conversation.id).throwOnError();
 
     // 2. Update local conversation store
     let found = false;
@@ -1121,220 +869,42 @@ export const connectivityService = {
   },
 
   // Subscribe to real-time incoming messages for current user across Broadcast and DB Postgres Changes
-  subscribeToRealtimeChat(
-    currentUser: UserProfile,
-    onIncomingMessage: (msg: NetworkMessage, participant: NetworkUser) => void
-  ): () => void {
-    if (!existingSupabaseClient) return () => {};
+  subscribeToRealtimeChat(currentUser: UserProfile, onIncomingMessage: (msg: NetworkMessage, participant: NetworkUser) => void): () => void {
+    let channel: any;
+    let disposed = false;
+    resolveUserUuid(existingSupabaseClient, currentUser).then(uid => {
+      if (!uid || disposed) return;
+      channel = existingSupabaseClient.channel(`network-messages-${uid}`)
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'network_messages', filter: `receiver_id=eq.${uid}` }, async ({ new: row }: any) => {
+          const { data: author } = await existingSupabaseClient.from('profiles').select('*').eq('id', row.sender_id).single();
+          if (!author || disposed) return;
+          onIncomingMessage({ id: row.id, senderId: row.sender_id, receiverId: row.receiver_id,
+            content: row.content, timestamp: new Date(row.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            isRead: row.is_read }, mapRowToNetworkUser(author, uid));
+        }).subscribe();
+    }).catch(error => console.warn('Chat subscription unavailable', error));
+    return () => { disposed = true; if (channel) existingSupabaseClient.removeChannel(channel); };
+  },
 
-    const currentMapped = mapProfileToNetworkUser(currentUser);
-    const seenMessageIds = new Set<string>();
-    let cachedUserUuid: string | null = null;
-    resolveUserUuid(existingSupabaseClient, currentUser).then((uid) => {
-      cachedUserUuid = uid;
+  async fetchConversations(currentUser: UserProfile): Promise<NetworkConversation[]> {
+    const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
+    if (!uid) return [];
+    const { data: rows } = await existingSupabaseClient.from('network_messages')
+      .select('*').or(`sender_id.eq.${uid},receiver_id.eq.${uid}`).order('created_at', { ascending: false }).limit(500).throwOnError();
+    const peers = [...new Set((rows || []).map(row => row.sender_id === uid ? row.receiver_id : row.sender_id))];
+    if (!peers.length) { this.saveConversations([], currentUser); return []; }
+    const { data: profiles } = await existingSupabaseClient.from('profiles').select('*').in('id', peers).throwOnError();
+    const conversations: NetworkConversation[] = (profiles || []).map(profile => {
+      const history = (rows || []).filter(row => row.sender_id === profile.id || row.receiver_id === profile.id).reverse();
+      const last = history[history.length - 1];
+      return { id: last.conversation_id, participant: mapRowToNetworkUser(profile, uid), lastMessage: last.content,
+        lastMessageTime: new Date(last.created_at).toLocaleTimeString(),
+        unreadCount: history.filter(row => row.receiver_id === uid && !row.is_read).length,
+        messages: history.map(row => ({ id: row.id, senderId: row.sender_id, receiverId: row.receiver_id,
+          content: row.content, timestamp: new Date(row.created_at).toLocaleTimeString(), isRead: row.is_read })) };
     });
-
-    const dispatchIncoming = (msg: NetworkMessage, incomingSender: NetworkUser) => {
-      if (seenMessageIds.has(msg.id)) return;
-      seenMessageIds.add(msg.id);
-      onIncomingMessage(msg, incomingSender);
-    };
-
-    // Use shared global channel for broadcast and table changes so all connected clients communicate
-    const channelName = 'public:global_realtime_chat';
-    const realtimeChannel = existingSupabaseClient
-      .channel(channelName)
-      // 1. Listen for Realtime Broadcast events
-      .on('broadcast', { event: 'chat_message' }, ({ payload }) => {
-        if (!payload) return;
-        const isForMe =
-          (cachedUserUuid && (payload.targetUuid === cachedUserUuid || payload.receiverId === cachedUserUuid)) ||
-          payload.receiverId === currentMapped.id ||
-          payload.receiverId === currentUser.id ||
-          payload.receiverId === currentUser.email ||
-          payload.targetUuid === currentMapped.id ||
-          payload.targetUuid === currentUser.id;
-
-        if (isForMe) {
-          const incomingSender: NetworkUser = {
-            id: payload.senderUuid || payload.senderId,
-            name: payload.senderName || 'Member',
-            avatarUrl:
-              payload.senderAvatar ||
-              'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80',
-            headline: 'Verified Peer',
-            company: 'Brainboost',
-            role: 'Developer',
-            location: 'Remote',
-            bio: '',
-            followersCount: 0,
-            followingCount: 0,
-            isFollowing: false,
-            isPrivate: false,
-            skills: ['Developer'],
-            certificates: [],
-            libraryItems: [],
-            projects: [],
-            internships: [],
-            achievements: [],
-            onlineStatus: 'online',
-          };
-
-          const newMsg: NetworkMessage = {
-            id: payload.id || `msg-${Date.now()}`,
-            senderId: payload.senderUuid || payload.senderId,
-            receiverId: payload.receiverId,
-            content: payload.content,
-            timestamp: payload.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            isRead: false,
-          };
-
-          dispatchIncoming(newMsg, incomingSender);
-        }
-      })
-      // 2. Listen for Postgres changes on network_messages table
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'network_messages',
-        },
-        async (payload) => {
-          const newRow = payload.new as any;
-          if (!newRow) return;
-          const isForMe =
-            (cachedUserUuid && newRow.receiver_id === cachedUserUuid) ||
-            newRow.receiver_id === currentMapped.id ||
-            newRow.receiver_id === currentUser.id;
-
-          if (isForMe) {
-            let senderName = 'Member';
-            let senderAvatar = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80';
-            let senderHeadline = 'Verified Peer';
-
-            try {
-              const { data: senderData } = await existingSupabaseClient
-                .from('profiles')
-                .select('name, avatar_url, headline, college, target_role')
-                .eq('id', newRow.sender_id)
-                .maybeSingle();
-
-              if (senderData) {
-                senderName = senderData.name || senderName;
-                senderAvatar = senderData.avatar_url || senderAvatar;
-                senderHeadline = senderData.headline || `${senderData.target_role || 'Developer'} • ${senderData.college || 'Brainboost'}`;
-              }
-            } catch {}
-
-            const incomingSender: NetworkUser = {
-              id: newRow.sender_id,
-              name: senderName,
-              avatarUrl: senderAvatar,
-              headline: senderHeadline,
-              company: 'Brainboost',
-              role: 'Developer',
-              location: 'Remote',
-              bio: '',
-              followersCount: 0,
-              followingCount: 0,
-              isFollowing: false,
-              isPrivate: false,
-              skills: ['Developer'],
-              certificates: [],
-              libraryItems: [],
-              projects: [],
-              internships: [],
-              achievements: [],
-              onlineStatus: 'online',
-            };
-
-            const newMsg: NetworkMessage = {
-              id: newRow.id || `msg-db-${Date.now()}`,
-              senderId: newRow.sender_id,
-              receiverId: newRow.receiver_id,
-              content: newRow.content,
-              timestamp: newRow.created_at
-                ? new Date(newRow.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              isRead: Boolean(newRow.is_read),
-            };
-
-            dispatchIncoming(newMsg, incomingSender);
-          }
-        }
-      )
-      // 3. Listen for Postgres changes on messages table
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages',
-        },
-        async (payload) => {
-          const newRow = payload.new as any;
-          if (newRow && (newRow.receiver_id === currentMapped.id || newRow.receiver_id === currentUser.id)) {
-            let senderName = 'Member';
-            let senderAvatar = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80';
-            let senderHeadline = 'Verified Peer';
-
-            try {
-              const { data: senderData } = await existingSupabaseClient
-                .from('profiles')
-                .select('name, avatar_url, headline, college, target_role')
-                .eq('id', newRow.sender_id)
-                .maybeSingle();
-
-              if (senderData) {
-                senderName = senderData.name || senderName;
-                senderAvatar = senderData.avatar_url || senderAvatar;
-                senderHeadline = senderData.headline || `${senderData.target_role || 'Developer'} • ${senderData.college || 'Brainboost'}`;
-              }
-            } catch {}
-
-            const incomingSender: NetworkUser = {
-              id: newRow.sender_id,
-              name: senderName,
-              avatarUrl: senderAvatar,
-              headline: senderHeadline,
-              company: 'Brainboost',
-              role: 'Developer',
-              location: 'Remote',
-              bio: '',
-              followersCount: 0,
-              followingCount: 0,
-              isFollowing: false,
-              isPrivate: false,
-              skills: ['Developer'],
-              certificates: [],
-              libraryItems: [],
-              projects: [],
-              internships: [],
-              achievements: [],
-              onlineStatus: 'online',
-            };
-
-            const newMsg: NetworkMessage = {
-              id: newRow.id || `msg-db-${Date.now()}`,
-              senderId: newRow.sender_id,
-              receiverId: newRow.receiver_id,
-              content: newRow.content,
-              timestamp: newRow.created_at
-                ? new Date(newRow.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              isRead: Boolean(newRow.is_read),
-            };
-
-            dispatchIncoming(newMsg, incomingSender);
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      existingSupabaseClient.removeChannel(realtimeChannel);
-    };
+    this.saveConversations(conversations, currentUser);
+    return conversations;
   },
 
   // Subscribe to live network events (follow/unfollow, live count changes)
@@ -1347,10 +917,8 @@ export const connectivityService = {
     const channelName = `network_events_global_${Date.now()}`;
     const channel = existingSupabaseClient
       .channel(channelName)
-      .on('broadcast', { event: 'network_event' }, ({ payload }) => {
-        if (payload) {
-          onEvent(payload);
-        }
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'network_follows' }, payload => {
+        onEvent({ type: 'follow_change', payload });
       })
       .subscribe();
 
@@ -1361,96 +929,17 @@ export const connectivityService = {
 
   // Toggle user follow / connect with direct Supabase persistence & real-time broadcast
   async toggleFollow(targetUserId: string, currentUser: UserProfile): Promise<NetworkUser[]> {
-    const users = this.getLocalUsers(currentUser);
-    let nextState = false;
-    const updated = users.map((u) => {
-      if (u.id === targetUserId) {
-        nextState = !u.isFollowing;
-        const isFriend = Boolean(nextState && u.isFollower);
-        return {
-          ...u,
-          isFollowing: nextState,
-          isFriend,
-          followersCount: nextState ? u.followersCount + 1 : Math.max(0, u.followersCount - 1),
-        };
-      }
-      return u;
-    });
-    this.saveLocalUsers(updated, currentUser);
-
-    if (existingSupabaseClient) {
-      try {
-        const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
-        const targetUid = (await resolveTargetUuid(existingSupabaseClient, targetUserId)) || targetUserId;
-
-        if (uid && targetUid) {
-          if (nextState) {
-            // Upsert into network_follows
-            try {
-              await existingSupabaseClient.from('network_follows').upsert(
-                { follower_id: uid, following_id: targetUid, status: 'approved' },
-                { onConflict: 'follower_id, following_id' }
-              );
-            } catch (nfErr) {
-              console.warn('network_follows upsert notice:', nfErr);
-            }
-            // Also upsert into user_follows
-            try {
-              await existingSupabaseClient.from('user_follows').upsert(
-                { follower_id: uid, following_id: targetUid, status: 'approved' },
-                { onConflict: 'follower_id, following_id' }
-              );
-            } catch (ufErr) {
-              console.warn('user_follows upsert notice:', ufErr);
-            }
-          } else {
-            // Delete from network_follows
-            try {
-              await existingSupabaseClient
-                .from('network_follows')
-                .delete()
-                .eq('follower_id', uid)
-                .eq('following_id', targetUid);
-            } catch (nfErr) {
-              console.warn('network_follows delete notice:', nfErr);
-            }
-            // Also delete from user_follows
-            try {
-              await existingSupabaseClient
-                .from('user_follows')
-                .delete()
-                .eq('follower_id', uid)
-                .eq('following_id', targetUid);
-            } catch (ufErr) {
-              console.warn('user_follows delete notice:', ufErr);
-            }
-          }
-
-          // Broadcast follow event to all clients
-          try {
-            const broadcastChannel = existingSupabaseClient.channel('network_events_global');
-            await broadcastChannel.send({
-              type: 'broadcast',
-              event: 'network_event',
-              payload: {
-                type: 'follow_change',
-                payload: {
-                  followerId: uid,
-                  followingId: targetUid,
-                  isFollowing: nextState,
-                },
-              },
-            });
-          } catch (bErr) {
-            console.warn('broadcast follow event notice:', bErr);
-          }
-        }
-      } catch (err) {
-        console.warn('Supabase toggleFollow notice:', err);
-      }
+    const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
+    const targetUid = await resolveTargetUuid(existingSupabaseClient, targetUserId);
+    if (!uid || !targetUid || uid === targetUid) throw new Error('Choose another registered user.');
+    const { data: existing } = await existingSupabaseClient.from('network_follows').select('id')
+      .eq('follower_id', uid).eq('following_id', targetUid).maybeSingle().throwOnError();
+    if (existing) {
+      await existingSupabaseClient.from('network_follows').delete().eq('id', existing.id).throwOnError();
+    } else {
+      await existingSupabaseClient.from('network_follows').insert({ follower_id: uid, following_id: targetUid, status: 'approved' }).throwOnError();
     }
-
-    return updated;
+    return this.fetchUsers(currentUser);
   },
 
   // Follow Requests and Library Privacy Access Requests (Clean with no dummy requests)
@@ -1512,7 +1001,7 @@ export const connectivityService = {
           requester_id: uid,
           target_user_id: targetUserId,
           status: 'pending',
-          updated_at: new Date().toISOString(),
+          requested_at: new Date().toISOString(),
         }, { onConflict: 'requester_id, target_user_id' }).then(() => {});
       }).catch((err) => console.warn('Supabase requestLibraryAccess notice:', err));
     }
@@ -1539,8 +1028,8 @@ export const connectivityService = {
       if (matched) {
         existingSupabaseClient
           .from('library_access_requests')
-          .update({ status: decision, updated_at: new Date().toISOString() })
-          .eq('requester_id', matched.requesterId)
+          .update({ status: decision, responded_at: new Date().toISOString() })
+          .eq('requester_id', matched.requesterId).eq('target_user_id', matched.targetUserId)
           .then(() => {});
       }
     }
@@ -1641,13 +1130,13 @@ export async function runSupabaseTableDiagnostics(): Promise<SupabaseSystemDiagn
   // 2. Tables to test
   const tablesToTest = [
     { name: 'profiles', label: 'User Profiles' },
-    { name: 'posts', label: 'Community Feed Posts' },
-    { name: 'messages', label: '1-on-1 Messages' },
+    { name: 'network_posts', label: 'Community Feed Posts' },
+    { name: 'network_messages', label: '1-on-1 Messages' },
     { name: 'user_skills', label: 'User Skills Matrix' },
     { name: 'user_roadmap_progress', label: 'Roadmap Milestone Progress' },
     { name: 'user_applications', label: 'Job & Internship Applications' },
     { name: 'user_course_progress', label: 'Course & Video Watch Progress' },
-    { name: 'certificates', label: 'Verified Certificates' },
+    { name: 'generated_certificates', label: 'Verified Certificates' },
   ];
 
   const tableResults: TableDiagnosticResult[] = [];
@@ -2014,7 +1503,7 @@ export const supabaseService = {
         const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
         if (uid) {
           const { data, error } = await existingSupabaseClient
-            .from('youtube_learning_tracks')
+            .from('youtube_tracks')
             .select('*')
             .eq('user_id', uid)
             .order('last_watched', { ascending: false });
@@ -2032,7 +1521,7 @@ export const supabaseService = {
               durationSeconds: t.duration_seconds || 0,
               durationFormatted: t.duration_formatted || '0m',
               verifiedWatchedSeconds: t.verified_watched_seconds || 0,
-              currentTime: Number(t.current_time) || 0,
+              currentTime: Number(t.current_time_spent) || 0,
               completionPercentage: Number(t.completion_percentage) || 0,
               status: t.status || 'in_progress',
               watchedRanges: t.watched_ranges || [],
@@ -2056,7 +1545,7 @@ export const supabaseService = {
     try {
       const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
       if (!uid) return;
-      await existingSupabaseClient.from('youtube_learning_tracks').upsert({
+      await existingSupabaseClient.from('youtube_tracks').upsert({
         user_id: uid,
         video_id: track.videoId,
         video_url: track.videoUrl,
@@ -2067,7 +1556,7 @@ export const supabaseService = {
         duration_seconds: track.durationSeconds || 0,
         duration_formatted: track.durationFormatted || '0m',
         verified_watched_seconds: track.verifiedWatchedSeconds || 0,
-        current_time: track.currentTime || 0,
+        current_time_spent: track.currentTime || 0,
         completion_percentage: track.completionPercentage || 0,
         status: track.status || 'in_progress',
         watched_ranges: track.watchedRanges || [],
@@ -2087,7 +1576,7 @@ export const supabaseService = {
     try {
       const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
       if (!uid) return;
-      await existingSupabaseClient.from('youtube_learning_tracks').delete().eq('user_id', uid).eq('video_id', videoId);
+      await existingSupabaseClient.from('youtube_tracks').delete().eq('user_id', uid).eq('video_id', videoId);
     } catch (e) {
       console.warn('deleteYouTubeTrack error:', e);
     }
@@ -2108,7 +1597,7 @@ export const supabaseService = {
             const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
             if (uid) {
               const { data: interactions } = await existingSupabaseClient
-                .from('user_opportunity_interactions')
+                .from('user_opportunities')
                 .select('*')
                 .eq('user_id', uid);
               if (Array.isArray(interactions)) {
@@ -2158,7 +1647,7 @@ export const supabaseService = {
     try {
       const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
       if (!uid) return;
-      await existingSupabaseClient.from('user_opportunity_interactions').upsert({
+      await existingSupabaseClient.from('user_opportunities').upsert({
         user_id: uid,
         opportunity_id: opportunityId,
         saved: isSaved,
@@ -2173,7 +1662,7 @@ export const supabaseService = {
     try {
       const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
       if (!uid) return;
-      await existingSupabaseClient.from('user_opportunity_interactions').upsert({
+      await existingSupabaseClient.from('user_opportunities').upsert({
         user_id: uid,
         opportunity_id: opportunityId,
         applied: true,
@@ -2252,7 +1741,6 @@ export const supabaseService = {
         certification_id: certificationId,
         status,
         prep_progress: status === 'Earned' ? 100 : status === 'In Progress' ? 50 : 0,
-        earned_date: status === 'Earned' ? new Date().toISOString() : null,
       }, { onConflict: 'user_id, certification_id' });
     } catch (e) {
       console.warn('updateUserCertification error:', e);
@@ -2269,10 +1757,13 @@ export const supabaseService = {
       try {
         const { data, error } = await existingSupabaseClient.from('webinars').select('*').limit(50);
         if (!error && Array.isArray(data) && data.length > 0) {
+          const likedIds = new Set<string>();
           const userRegs = new Map<string, { isRegistered: boolean; isLiked: boolean; hasClaimedCertificate: boolean }>();
           if (currentUser) {
             const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
             if (uid) {
+              const { data: likes } = await existingSupabaseClient.from('webinar_likes').select('webinar_id').eq('user_id', uid);
+              (likes || []).forEach(like => likedIds.add(like.webinar_id));
               const { data: regs } = await existingSupabaseClient
                 .from('webinar_registrations')
                 .select('*')
@@ -2282,7 +1773,7 @@ export const supabaseService = {
                   userRegs.set(r.webinar_id, {
                     isRegistered: true,
                     isLiked: Boolean(r.is_liked),
-                    hasClaimedCertificate: Boolean(r.has_claimed_certificate),
+                    hasClaimedCertificate: Boolean(r.certificate_claimed),
                   });
                 }
               }
@@ -2294,7 +1785,7 @@ export const supabaseService = {
             return {
               id: w.id,
               title: w.title,
-              speaker: w.speaker || { name: 'Principal Mentor', title: 'Tech Lead', company: 'Brainboost', avatar: '' },
+              speaker: { name: w.speaker_name, title: w.speaker_role, company: w.speaker_company, avatar: w.speaker_avatar },
               dateTime: w.date_time || new Date().toISOString(),
               duration: w.duration || '60m',
               tags: w.tags || [],
@@ -2303,7 +1794,7 @@ export const supabaseService = {
               isRegistered: Boolean(userState?.isRegistered),
               attendeesCount: w.attendees_count || 0,
               likesCount: w.likes_count || 0,
-              isLiked: Boolean(userState?.isLiked),
+              isLiked: likedIds.has(w.id),
               youtubeUrl: w.youtube_url,
               youtubeVideoId: w.youtube_video_id,
               zoomMeetingUrl: w.zoom_meeting_url,
@@ -2352,11 +1843,11 @@ export const supabaseService = {
     try {
       const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
       if (!uid) return;
-      await existingSupabaseClient.from('webinar_registrations').upsert({
-        user_id: uid,
-        webinar_id: webinarId,
-        is_liked: isLiked,
-      }, { onConflict: 'user_id, webinar_id' });
+      if (isLiked) {
+        await existingSupabaseClient.from('webinar_likes').upsert({ user_id: uid, webinar_id: webinarId }, { onConflict: 'user_id,webinar_id' }).throwOnError();
+      } else {
+        await existingSupabaseClient.from('webinar_likes').delete().eq('user_id', uid).eq('webinar_id', webinarId).throwOnError();
+      }
     } catch (e) {
       console.warn('toggleWebinarLike error:', e);
     }
@@ -2366,9 +1857,12 @@ export const supabaseService = {
     if (!existingSupabaseClient) return;
     try {
       await existingSupabaseClient.from('webinars').insert({
-        id: webinar.id || `webinar-${Date.now()}`,
+        id: webinar.id && /^[0-9a-f-]{36}$/i.test(webinar.id) ? webinar.id : crypto.randomUUID(),
         title: webinar.title,
-        speaker: webinar.speaker,
+        speaker_name: webinar.speaker?.name || '',
+        speaker_role: webinar.speaker?.title || '',
+        speaker_company: webinar.speaker?.company || '',
+        speaker_avatar: webinar.speaker?.avatar || '',
         date_time: webinar.dateTime || new Date().toISOString(),
         duration: webinar.duration || '60m',
         tags: webinar.tags || [],
@@ -2457,7 +1951,7 @@ export const supabaseService = {
         assignment_id: assignmentId,
         status: 'Graded',
         github_repo_url: submission.githubRepoUrl,
-        submission_content: submission.notes,
+        notes: submission.notes,
         score: submission.score || 96,
         feedback: submission.feedback,
         submitted_at: new Date().toISOString(),
@@ -2483,7 +1977,7 @@ export const supabaseService = {
             const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
             if (uid) {
               const { data: progressList } = await existingSupabaseClient
-                .from('user_tool_progress')
+                .from('user_industry_tool_statuses')
                 .select('*')
                 .eq('user_id', uid);
               if (Array.isArray(progressList)) {
@@ -2524,7 +2018,7 @@ export const supabaseService = {
     try {
       const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
       if (!uid) return;
-      await existingSupabaseClient.from('user_tool_progress').upsert({
+      await existingSupabaseClient.from('user_industry_tool_statuses').upsert({
         user_id: uid,
         tool_id: toolId,
         status,
@@ -2537,6 +2031,13 @@ export const supabaseService = {
 
   // 8. User Roadmap from Supabase `roadmap_nodes` & `user_roadmap_progress`
   async getUserRoadmap(currentUser: UserProfile): Promise<RoadmapNode[]> {
+    const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
+    if (uid) {
+      const { data, error } = await existingSupabaseClient.from('user_api_results').select('result')
+        .eq('user_id', uid).eq('operation', '/api/ai/generate-roadmap').maybeSingle();
+      if (error) throw error;
+      if (Array.isArray(data?.result?.roadmap?.nodes)) return data.result.roadmap.nodes;
+    }
     const cacheKey = `user_roadmap_${currentUser.email || 'anon'}`;
     const cached = getFromMemoryCache<RoadmapNode[]>(cacheKey);
     if (cached) return cached;
@@ -2612,15 +2113,10 @@ export const supabaseService = {
     try {
       const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
       if (!uid) return;
-      for (const node of nodes) {
-        await existingSupabaseClient.from('user_roadmap_progress').upsert({
-          user_id: uid,
-          node_id: node.id,
-          status: node.status,
-          progress: node.progress,
-          updated_at: new Date().toISOString(),
-        }, { onConflict: 'user_id, node_id' });
-      }
+      await existingSupabaseClient.from('user_api_results').upsert({
+        user_id: uid, operation: '/api/ai/generate-roadmap',
+        result: { roadmap: { nodes } }, updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id,operation' }).throwOnError();
     } catch (e) {
       console.warn('saveUserRoadmap error:', e);
     }
@@ -2649,7 +2145,7 @@ export const supabaseService = {
     try {
       const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
       if (!uid) return;
-      await existingSupabaseClient.from('certificates').upsert({
+      await existingSupabaseClient.from('generated_certificates').upsert({
         serial_id: cert.serialId,
         user_id: uid,
         type: cert.type,
@@ -2669,7 +2165,7 @@ export const supabaseService = {
         legal_disclaimer: cert.legalDisclaimer || 'Unofficial completion record.',
         verification_url: cert.verificationUrl || `https://brainboost.ai/verify/${cert.serialId}`,
         verification_badge: cert.verificationBadge,
-      }, { onConflict: 'serial_id' });
+      }, { onConflict: 'serial_id', ignoreDuplicates: true });
     } catch (e) {
       console.warn('saveCertificate error:', e);
     }
@@ -2681,9 +2177,9 @@ export const supabaseService = {
     try {
       const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
       if (!uid) return;
-      await existingSupabaseClient.from('safety_reports').insert({
+      await existingSupabaseClient.from('scam_reports').insert({
         user_id: uid,
-        job_offer_text: jobOfferText,
+        analyzed_text: jobOfferText,
         risk_score: report.riskScore ?? 0,
         risk_level: report.riskLevel || 'LOW RISK',
         summary: report.summary || 'Safety analysis completed.',
@@ -2696,24 +2192,4 @@ export const supabaseService = {
     }
   },
 
-  // 11. Nebula AI Copilot Message in Supabase `ai_chat_messages` table
-  async saveNebulaMessage(message: ChatMessage, currentUser: UserProfile): Promise<void> {
-    if (!existingSupabaseClient) return;
-    try {
-      const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
-      if (!uid) return;
-      await existingSupabaseClient.from('ai_chat_messages').insert({
-        user_id: uid,
-        role: message.role === 'model' ? 'model' : 'user',
-        content: message.content,
-        model_used: message.modelUsed || 'gemini-3.7-flash',
-        thinking_mode_active: Boolean(message.thinkingModeActive),
-        language: message.language || 'English',
-        mode: message.mode || 'career',
-      });
-    } catch (e) {
-      console.warn('saveNebulaMessage error:', e);
-    }
-  },
 };
-

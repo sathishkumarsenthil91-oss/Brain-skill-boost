@@ -1,3 +1,4 @@
+import { apiFetch } from '../services/api';
 import React, { useState } from 'react';
 import { ViewType, UserProfile, RoadmapNode } from '../types';
 
@@ -24,7 +25,7 @@ export const RoadmapView: React.FC<RoadmapViewProps> = ({
   const handleGenerateCustomRoadmap = async () => {
     setIsGenerating(true);
     try {
-      const response = await fetch('/api/ai/generate-roadmap', {
+      const response = await apiFetch('/api/ai/generate-roadmap', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

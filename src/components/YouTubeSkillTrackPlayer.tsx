@@ -1,3 +1,4 @@
+import { apiFetch } from '../services/api';
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { YouTubeLearningTrack, UserProfile, UnofficialLearningRecord } from '../types';
 import {
@@ -410,7 +411,7 @@ export const YouTubeSkillTrackPlayer: React.FC<YouTubeSkillTrackPlayerProps> = (
     if (isGeneratingSummary) return;
     setIsGeneratingSummary(true);
     try {
-      const res = await fetch('/api/youtube/summarize', {
+      const res = await apiFetch('/api/youtube/summarize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

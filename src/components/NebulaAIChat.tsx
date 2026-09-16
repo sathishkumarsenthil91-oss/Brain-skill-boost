@@ -1,3 +1,5 @@
+import { supabase } from '../supabaseClient';
+import { apiFetch } from '../services/api';
 import React, { useState, useRef, useEffect } from 'react';
 import { ViewType, UserProfile, ChatMessage } from '../types';
 import { NEBULA_LOGO_URL } from '../data/mockData';
@@ -179,6 +181,9 @@ How can I help you today? Type below or pick a quick starter prompt!`,
     },
   ]);
 
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [chatError, setChatError] = useState('');
   const [inputMessage, setInputMessage] = useState('');
   const [selectedLanguage, setSelectedLanguage] = useState<string>('auto');
   const [activeMode, setActiveMode] = useState<AIMode>('career');
@@ -199,6 +204,32 @@ How can I help you today? Type below or pick a quick starter prompt!`,
   const abortControllerRef = useRef<AbortController | null>(null);
   const speechRecognitionRef = useRef<any>(null);
   const langDropdownRef = useRef<HTMLDivElement>(null);
+
+  const restoreHistory = async (id: string) => {
+    const { data, error } = await supabase.from('ai_chat_messages')
+      .select('id,role,content,model_used,thinking_mode_active,language,created_at')
+      .eq('session_id', id).order('created_at', { ascending: false }).limit(100);
+    if (error) throw error;
+    setMessages((data || []).reverse().map(row => ({
+      id: row.id, role: row.role === 'user' ? 'user' : 'model', content: row.content,
+      timestamp: new Date(row.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      modelUsed: row.model_used, thinkingModeActive: row.thinking_mode_active, language: row.language,
+    })));
+  };
+  useEffect(() => {
+    let active = true;
+    setSessionId(null); setMessages([]); setHistoryLoading(true);
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Please sign in to load your chat history.');
+      const { data, error } = await supabase.from('ai_chat_sessions').select('id')
+        .eq('user_id', session.user.id).order('updated_at', { ascending: false }).limit(1).maybeSingle();
+      if (error) throw error;
+      if (active && data) { setSessionId(data.id); await restoreHistory(data.id); }
+    })().catch(error => { if (active) setChatError(error.message); })
+      .finally(() => { if (active) setHistoryLoading(false); });
+    return () => { active = false; abortControllerRef.current?.abort(); };
+  }, [user.id, user.email]);
 
   // Auto-scroll to bottom
   const scrollToBottom = () => {
@@ -306,179 +337,36 @@ How can I help you today? Type below or pick a quick starter prompt!`,
     window.speechSynthesis.speak(utterance);
   };
 
-  // Real-Time Streaming Message Sender
+  // A single request owns both the provider call and durable chat writes.
   const handleSendMessage = async (textToSend?: string) => {
-    const text = textToSend || inputMessage;
-    if (!text.trim() || isLoading) return;
-
-    // Stop ongoing speech
-    if (isSpeaking) {
-      window.speechSynthesis.cancel();
-      setIsSpeaking(null);
-    }
-
-    const userMsg: ChatMessage = {
-      id: `user-${Date.now()}`,
-      role: 'user',
-      content: text.trim(),
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      language: selectedLanguage,
-      mode: activeMode,
-    };
-
-    setMessages((prev) => [...prev, userMsg]);
-    setInputMessage('');
+    const text = (textToSend || inputMessage).trim();
+    if (!text || isLoading || historyLoading) return;
+    if (isSpeaking) { window.speechSynthesis.cancel(); setIsSpeaking(null); }
+    setChatError('');
     setIsLoading(true);
-    setStreamingText('');
-
-    abortControllerRef.current = new AbortController();
-
+    setInputMessage('');
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
     try {
-      const savedLearningTracks = loadUserTracks(user.email || 'default');
-      // Attempt Server-Sent Events (SSE) streaming
-      const response = await fetch('/api/ai/chat/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: text.trim(),
-          history: messages.slice(-8),
-          thinkingMode: isThinkingMode,
-          language: selectedLanguage,
-          mode: activeMode,
-          userProfile: user,
-          learningTracksContext: savedLearningTracks,
+      const response = await apiFetch('/api/ai/chat', {
+        method: 'POST', signal: controller.signal,
+        body: JSON.stringify({ message: text, sessionId, mode: activeMode,
+          language: selectedLanguage, thinkingMode: isThinkingMode,
+          history: messages.filter(m => !m.id.startsWith('msg-init')).slice(-12).map(m => ({
+            role: m.role === 'model' ? 'assistant' : 'user', content: m.content,
+          })),
         }),
-        signal: abortControllerRef.current.signal,
       });
-
-      if (!response.ok || !response.body) {
-        throw new Error('Streaming failed or not supported, falling back to standard JSON API');
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let accumulatedText = '';
-      let sseBuffer = '';
-      let detectedModel = isThinkingMode ? 'gemini-3.1-pro-preview' : 'gemini-3.7-flash';
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        sseBuffer += decoder.decode(value, { stream: true });
-        const lines = sseBuffer.split('\n');
-        sseBuffer = lines.pop() || '';
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (trimmed.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(trimmed.slice(6));
-              if (data.chunk) {
-                accumulatedText += data.chunk;
-                setStreamingText(accumulatedText);
-              }
-              if (data.modelUsed) {
-                detectedModel = data.modelUsed;
-              }
-            } catch (e) {
-              // Ignore partial JSON
-            }
-          }
-        }
-      }
-
-      // Process any remaining bytes in buffer
-      if (sseBuffer.trim().startsWith('data: ')) {
-        try {
-          const data = JSON.parse(sseBuffer.trim().slice(6));
-          if (data.chunk) {
-            accumulatedText += data.chunk;
-          }
-          if (data.modelUsed) {
-            detectedModel = data.modelUsed;
-          }
-        } catch (e) {
-          // Ignore
-        }
-      }
-
-      if (!accumulatedText.trim()) {
-        throw new Error('Streaming yielded empty text, falling back to standard JSON API');
-      }
-
-      const aiMsg: ChatMessage = {
-        id: `ai-${Date.now()}`,
-        role: 'model',
-        content: accumulatedText.trim(),
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        modelUsed: detectedModel,
-        thinkingModeActive: isThinkingMode,
-        language: selectedLanguage,
-        mode: activeMode,
-      };
-
-      setMessages((prev) => [...prev, aiMsg]);
-      setStreamingText('');
-    } catch (err: any) {
-      if (err.name === 'AbortError') {
-        console.log('Stream aborted by user');
-        if (streamingText) {
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: `ai-aborted-${Date.now()}`,
-              role: 'model',
-              content: streamingText + '\n\n*(Response stopped by user)*',
-              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            },
-          ]);
-        }
-      } else {
-        console.warn('Falling back to standard chat API:', err);
-        // Fallback to standard POST
-        try {
-          const fallbackRes = await fetch('/api/ai/chat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              message: text.trim(),
-              history: messages.slice(-6),
-              thinkingMode: isThinkingMode,
-              language: selectedLanguage,
-              mode: activeMode,
-              userProfile: user,
-            }),
-          });
-          const data = await fallbackRes.json();
-          const reply = data?.reply || data?.fallback || 'Nebula AI is ready to help you level up your technical career.';
-
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: `ai-${Date.now()}`,
-              role: 'model',
-              content: reply,
-              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              modelUsed: data?.modelUsed || 'gemini-3.7-flash',
-              thinkingModeActive: isThinkingMode,
-            },
-          ]);
-        } catch (innerErr) {
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: `ai-err-${Date.now()}`,
-              role: 'model',
-              content: 'Nebula AI is operating smoothly. For your target role, focusing on closing your top skill gap with practical projects will give you the highest immediate ROI.',
-              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            },
-          ]);
-        }
-      }
+      const data = await response.json();
+      setSessionId(data.sessionId);
+      await restoreHistory(data.sessionId);
+    } catch (error: any) {
+      setInputMessage(text);
+      setChatError(controller.signal.aborted
+        ? 'Request stopped. Any message already saved will appear when you reopen the chat.'
+        : error.message || 'Unable to send your message. Please try again.');
     } finally {
       setIsLoading(false);
-      setStreamingText('');
       abortControllerRef.current = null;
     }
   };
@@ -497,7 +385,7 @@ How can I help you today? Type below or pick a quick starter prompt!`,
     );
 
     try {
-      const res = await fetch('/api/ai/translate', {
+      const res = await apiFetch('/api/ai/translate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -544,18 +432,16 @@ How can I help you today? Type below or pick a quick starter prompt!`,
     URL.revokeObjectURL(url);
   };
 
-  // Clear chat history
-  const handleClearChat = () => {
-    if (confirm('Clear entire chat history and start a fresh session?')) {
-      setMessages([
-        {
-          id: 'msg-init-reset',
-          role: 'model',
-          content: `Chat session refreshed! Ready for new questions for your **${user.targetRole}** journey.`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        },
-      ]);
-    }
+  // Delete through the user's RLS context before clearing the visible conversation.
+  const handleClearChat = async () => {
+    if (isLoading || historyLoading || !confirm('Clear this chat history?')) return;
+    try {
+      if (sessionId) {
+        const { error } = await supabase.from('ai_chat_sessions').delete().eq('id', sessionId);
+        if (error) throw error;
+      }
+      setSessionId(null); setMessages([]); setChatError('');
+    } catch { setChatError('Could not clear chat history. Please try again.'); }
   };
 
   // Insert code snippet into message
@@ -918,7 +804,8 @@ How can I help you today? Type below or pick a quick starter prompt!`,
             </div>
           </div>
         )}
-        <div ref={messagesEndRef} />
+        {chatError && <p role="alert" className="p-3 text-sm text-red-600">{chatError}</p>}
+          <div ref={messagesEndRef} />
       </div>
 
       {/* Quick Prompt Category Tabs & Chips */}

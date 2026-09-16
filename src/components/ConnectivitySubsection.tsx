@@ -142,10 +142,12 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
 
     // 2. Fetch live data asynchronously from Supabase
     try {
-      const [liveUsers, livePosts] = await Promise.all([
+      const [liveUsers, livePosts, liveConversations] = await Promise.all([
         connectivityService.fetchUsers(user),
         connectivityService.fetchPosts(user),
+        connectivityService.fetchConversations(user),
       ]);
+      setConversations(liveConversations);
       if (Array.isArray(liveUsers)) {
         setUsers(liveUsers);
       }
@@ -385,12 +387,17 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
     const messageText = chatMessageText.trim();
     setChatMessageText('');
 
+    try {
     const { updatedConversations } = await connectivityService.sendMessage(
       activeChatUser,
       messageText,
       user
     );
     setConversations(updatedConversations);
+    } catch (error: any) {
+      setChatMessageText(messageText);
+      showToast(error.message || 'Message could not be saved. Please try again.');
+    }
   };
 
   // Open chat with a specific user from profile or story
