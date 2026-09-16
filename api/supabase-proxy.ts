@@ -5,7 +5,7 @@ import {
   refreshCookieSession,
   requireAppRequest,
   setNoStore,
-} from '../server-lib/session';
+} from './_lib/session.js';
 
 const FORWARDED_REQUEST_HEADERS = [
   'accept',
