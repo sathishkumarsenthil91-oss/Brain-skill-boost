@@ -11,10 +11,12 @@ export const SUPABASE_PUBLIC_KEY =
   process.env.VITE_SUPABASE_ANON_KEY ||
   'sb_publishable_CZTBEfxJPsy4EjJSMXtydw_yZ0gzyJ0';
 
-const ACCESS_COOKIE = '__Host-bb_access';
-const REFRESH_COOKIE = '__Host-bb_refresh';
-const REMEMBER_COOKIE = '__Host-bb_remember';
-const PKCE_COOKIE = '__Host-bb_pkce';
+const COOKIE_BASE = {
+  access: 'bb_access',
+  refresh: 'bb_refresh',
+  remember: 'bb_remember',
+  pkce: 'bb_pkce',
+};
 
 function headerValue(req: any, name: string): string {
   const value = req?.headers?.[name.toLowerCase()] ?? req?.headers?.[name];
@@ -43,6 +45,10 @@ function isSecureRequest(req: any): boolean {
   const proto = headerValue(req, 'x-forwarded-proto').split(',')[0]?.trim();
   if (proto) return proto === 'https';
   return process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL);
+}
+
+function cookieName(req: any, base: string): string {
+  return isSecureRequest(req) ? `__Host-${base}` : base;
 }
 
 function serializeCookie(
@@ -134,7 +140,7 @@ export function setSessionCookies(req: any, res: any, session: Session, remember
 
   appendSetCookie(
     res,
-    serializeCookie(req, ACCESS_COOKIE, session.access_token, {
+    serializeCookie(req, cookieName(req, COOKIE_BASE.access), session.access_token, {
       maxAge: remember ? accessMaxAge : undefined,
       httpOnly: true,
       sameSite: 'Lax',
@@ -142,7 +148,7 @@ export function setSessionCookies(req: any, res: any, session: Session, remember
   );
   appendSetCookie(
     res,
-    serializeCookie(req, REFRESH_COOKIE, session.refresh_token, {
+    serializeCookie(req, cookieName(req, COOKIE_BASE.refresh), session.refresh_token, {
       maxAge: remember ? refreshMaxAge : undefined,
       httpOnly: true,
       sameSite: 'Lax',
@@ -150,7 +156,7 @@ export function setSessionCookies(req: any, res: any, session: Session, remember
   );
   appendSetCookie(
     res,
-    serializeCookie(req, REMEMBER_COOKIE, remember ? '1' : '0', {
+    serializeCookie(req, cookieName(req, COOKIE_BASE.remember), remember ? '1' : '0', {
       maxAge: remember ? refreshMaxAge : undefined,
       httpOnly: true,
       sameSite: 'Lax',
@@ -159,21 +165,21 @@ export function setSessionCookies(req: any, res: any, session: Session, remember
 }
 
 export function clearSessionCookies(req: any, res: any) {
-  appendSetCookie(res, serializeCookie(req, ACCESS_COOKIE, '', { clear: true }));
-  appendSetCookie(res, serializeCookie(req, REFRESH_COOKIE, '', { clear: true }));
-  appendSetCookie(res, serializeCookie(req, REMEMBER_COOKIE, '', { clear: true }));
+  appendSetCookie(res, serializeCookie(req, cookieName(req, COOKIE_BASE.access), '', { clear: true }));
+  appendSetCookie(res, serializeCookie(req, cookieName(req, COOKIE_BASE.refresh), '', { clear: true }));
+  appendSetCookie(res, serializeCookie(req, cookieName(req, COOKIE_BASE.remember), '', { clear: true }));
 }
 
 export function clearPkceCookie(req: any, res: any) {
-  appendSetCookie(res, serializeCookie(req, PKCE_COOKIE, '', { clear: true }));
+  appendSetCookie(res, serializeCookie(req, cookieName(req, COOKIE_BASE.pkce), '', { clear: true }));
 }
 
 export function getCookieSession(req: any) {
   const cookies = parseCookies(req);
   return {
-    accessToken: cookies[ACCESS_COOKIE] || '',
-    refreshToken: cookies[REFRESH_COOKIE] || '',
-    remember: cookies[REMEMBER_COOKIE] !== '0',
+    accessToken: cookies[cookieName(req, COOKIE_BASE.access)] || '',
+    refreshToken: cookies[cookieName(req, COOKIE_BASE.refresh)] || '',
+    remember: cookies[cookieName(req, COOKIE_BASE.remember)] !== '0',
   };
 }
 
@@ -249,13 +255,13 @@ export function createPkceAuthClient(req: any, res: any) {
   const storage = {
     getItem: async (key: string) => {
       if (!key.includes('code-verifier')) return null;
-      return parseCookies(req)[PKCE_COOKIE] || null;
+      return parseCookies(req)[cookieName(req, COOKIE_BASE.pkce)] || null;
     },
     setItem: async (key: string, value: string) => {
       if (!key.includes('code-verifier')) return;
       appendSetCookie(
         res,
-        serializeCookie(req, PKCE_COOKIE, value, {
+        serializeCookie(req, cookieName(req, COOKIE_BASE.pkce), value, {
           maxAge: 10 * 60,
           httpOnly: true,
           sameSite: 'Lax',
