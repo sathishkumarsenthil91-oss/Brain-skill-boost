@@ -1,4 +1,4 @@
-import { requireAppRequest, revokeCurrentSession, setNoStore } from '../../server-lib/session';
+import { requireAppRequest, revokeCurrentSession, setNoStore } from '../_lib/session.js';
 
 export default async function handler(req: any, res: any) {
   setNoStore(res);
