@@ -6,7 +6,9 @@ export default async function handler(req: any, res: any) {
 
   try {
     const supabase = createPkceAuthClient(req, res);
-    const redirectTo = `${requestOrigin(req)}/api/auth/google-callback`;
+    // Use the app root because it is already the normal Supabase redirect target.
+    // The browser immediately forwards the one-time PKCE code to our server callback.
+    const redirectTo = `${requestOrigin(req)}/?auth_callback=1`;
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
