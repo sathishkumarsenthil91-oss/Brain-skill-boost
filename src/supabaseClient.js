@@ -12,6 +12,26 @@ const SUPABASE_PUBLIC_KEY =
 const APP_REQUEST_HEADER = { 'x-brainboost-request': '1' };
 const PROXY_PREFIXES = ['/rest/v1/', '/functions/v1/', '/storage/v1/'];
 
+function forwardOAuthCodeToServer() {
+  if (typeof window === 'undefined') return;
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('auth_callback') !== '1') return;
+
+    const target = new URL('/api/auth/google-callback', window.location.origin);
+    const code = params.get('code');
+    const error = params.get('error');
+    const errorDescription = params.get('error_description');
+    if (code) target.searchParams.set('code', code);
+    if (error) target.searchParams.set('error', error);
+    if (errorDescription) target.searchParams.set('error_description', errorDescription);
+
+    window.location.replace(target.pathname + target.search);
+  } catch {
+    // If callback parsing fails, normal auth UI will handle the unauthenticated state.
+  }
+}
+
 // One-time cleanup from the old browser-persisted Supabase Auth model.
 // User profile/UI caches are intentionally kept; only auth token material is removed.
 function purgeLegacyBrowserAuthTokens() {
@@ -34,6 +54,7 @@ function purgeLegacyBrowserAuthTokens() {
   }
 }
 
+forwardOAuthCodeToServer();
 purgeLegacyBrowserAuthTokens();
 
 export function reportServiceError(message) {
