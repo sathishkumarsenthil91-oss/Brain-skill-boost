@@ -98,8 +98,12 @@ export function setNoStore(res: any) {
 }
 
 export function requestOrigin(req: any): string {
-  const proto = headerValue(req, 'x-forwarded-proto').split(',')[0]?.trim() || (isSecureRequest(req) ? 'https' : 'http');
-  const host = headerValue(req, 'x-forwarded-host').split(',')[0]?.trim() || headerValue(req, 'host');
+  const proto =
+    headerValue(req, 'x-forwarded-proto').split(',')[0]?.trim() ||
+    (isSecureRequest(req) ? 'https' : 'http');
+  const host =
+    headerValue(req, 'x-forwarded-host').split(',')[0]?.trim() ||
+    headerValue(req, 'host');
   return `${proto}://${host}`;
 }
 
@@ -108,6 +112,7 @@ export function requireAppRequest(req: any, res: any): boolean {
     res.status(403).json({ error: 'Request verification failed' });
     return false;
   }
+
   const origin = headerValue(req, 'origin');
   const expected = requestOrigin(req);
   if (origin && origin !== expected) {
@@ -124,13 +129,19 @@ function toAuthError(status: number, payload: any, fallback: string): AuthError 
     payload?.error_description ||
     (typeof payload?.error === 'string' ? payload.error : '') ||
     fallback;
-  return { message: String(message), status, code: payload?.code || payload?.error_code };
+  return {
+    message: String(message),
+    status,
+    code: payload?.code || payload?.error_code,
+  };
 }
 
 async function authFetch(path: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers || {});
   headers.set('apikey', SUPABASE_PUBLIC_KEY);
-  if (!headers.has('Content-Type') && init.body) headers.set('Content-Type', 'application/json');
+  if (!headers.has('Content-Type') && init.body) {
+    headers.set('Content-Type', 'application/json');
+  }
 
   const response = await fetch(`${SUPABASE_URL}/auth/v1${path}`, {
     ...init,
@@ -143,12 +154,13 @@ async function authFetch(path: string, init: RequestInit = {}) {
 
 function normalizeSession(payload: any): AuthSession | null {
   if (!payload?.access_token || !payload?.refresh_token || !payload?.user) return null;
+  const expiresIn = Number(payload.expires_in || 3600);
   return {
     access_token: String(payload.access_token),
     refresh_token: String(payload.refresh_token),
     token_type: payload.token_type || 'bearer',
-    expires_in: Number(payload.expires_in || 3600),
-    expires_at: Number(payload.expires_at || (Math.floor(Date.now() / 1000) + Number(payload.expires_in || 3600))),
+    expires_in: expiresIn,
+    expires_at: Number(payload.expires_at || Math.floor(Date.now() / 1000) + expiresIn),
     user: payload.user,
   };
 }
@@ -162,13 +174,24 @@ export function createRequestAuthClient() {
             method: 'POST',
             body: JSON.stringify({ email, password }),
           });
-          if (!response.ok) return { data: { user: null, session: null }, error: toAuthError(response.status, payload, 'Unable to sign in') };
+          if (!response.ok) {
+            return {
+              data: { user: null, session: null },
+              error: toAuthError(response.status, payload, 'Unable to sign in'),
+            };
+          }
           const session = normalizeSession(payload);
           return session
             ? { data: { user: session.user, session }, error: null }
-            : { data: { user: null, session: null }, error: toAuthError(502, payload, 'Authentication returned an invalid session') };
+            : {
+                data: { user: null, session: null },
+                error: toAuthError(502, payload, 'Authentication returned an invalid session'),
+              };
         } catch (error: any) {
-          return { data: { user: null, session: null }, error: { message: error?.message || 'Authentication service unavailable', status: 503 } };
+          return {
+            data: { user: null, session: null },
+            error: { message: error?.message || 'Authentication service unavailable', status: 503 },
+          };
         }
       },
 
@@ -176,14 +199,26 @@ export function createRequestAuthClient() {
         try {
           const { response, payload } = await authFetch('/signup', {
             method: 'POST',
-            body: JSON.stringify({ email, password, data: options?.data || {} }),
+            body: JSON.stringify({
+              email,
+              password,
+              data: options?.data || {},
+            }),
           });
-          if (!response.ok) return { data: { user: null, session: null }, error: toAuthError(response.status, payload, 'Unable to register') };
+          if (!response.ok) {
+            return {
+              data: { user: null, session: null },
+              error: toAuthError(response.status, payload, 'Unable to register'),
+            };
+          }
           const session = normalizeSession(payload);
           const user = session?.user || payload?.user || (payload?.id ? payload : null);
           return { data: { user, session }, error: null };
         } catch (error: any) {
-          return { data: { user: null, session: null }, error: { message: error?.message || 'Registration service unavailable', status: 503 } };
+          return {
+            data: { user: null, session: null },
+            error: { message: error?.message || 'Registration service unavailable', status: 503 },
+          };
         }
       },
 
@@ -193,13 +228,24 @@ export function createRequestAuthClient() {
             method: 'POST',
             body: JSON.stringify({ refresh_token }),
           });
-          if (!response.ok) return { data: { user: null, session: null }, error: toAuthError(response.status, payload, 'Unable to refresh session') };
+          if (!response.ok) {
+            return {
+              data: { user: null, session: null },
+              error: toAuthError(response.status, payload, 'Unable to refresh session'),
+            };
+          }
           const session = normalizeSession(payload);
           return session
             ? { data: { user: session.user, session }, error: null }
-            : { data: { user: null, session: null }, error: toAuthError(502, payload, 'Refresh returned an invalid session') };
+            : {
+                data: { user: null, session: null },
+                error: toAuthError(502, payload, 'Refresh returned an invalid session'),
+              };
         } catch (error: any) {
-          return { data: { user: null, session: null }, error: { message: error?.message || 'Session refresh unavailable', status: 503 } };
+          return {
+            data: { user: null, session: null },
+            error: { message: error?.message || 'Session refresh unavailable', status: 503 },
+          };
         }
       },
 
@@ -209,10 +255,18 @@ export function createRequestAuthClient() {
             method: 'GET',
             headers: { Authorization: `Bearer ${accessToken}` },
           });
-          if (!response.ok) return { data: { user: null }, error: toAuthError(response.status, payload, 'Invalid session') };
+          if (!response.ok) {
+            return {
+              data: { user: null },
+              error: toAuthError(response.status, payload, 'Invalid session'),
+            };
+          }
           return { data: { user: payload }, error: null };
         } catch (error: any) {
-          return { data: { user: null }, error: { message: error?.message || 'Session validation unavailable', status: 503 } };
+          return {
+            data: { user: null },
+            error: { message: error?.message || 'Session validation unavailable', status: 503 },
+          };
         }
       },
     },
@@ -235,9 +289,25 @@ function jwtExpiry(accessToken: string): number | undefined {
 export function setSessionCookies(req: any, res: any, session: AuthSession, remember = true) {
   const accessMaxAge = Math.max(60, Number(session.expires_in || 3600));
   const refreshMaxAge = 60 * 60 * 24 * 365;
-  appendSetCookie(res, serializeCookie(req, cookieName(req, COOKIE_BASE.access), session.access_token, { maxAge: remember ? accessMaxAge : undefined }));
-  appendSetCookie(res, serializeCookie(req, cookieName(req, COOKIE_BASE.refresh), session.refresh_token, { maxAge: remember ? refreshMaxAge : undefined }));
-  appendSetCookie(res, serializeCookie(req, cookieName(req, COOKIE_BASE.remember), remember ? '1' : '0', { maxAge: remember ? refreshMaxAge : undefined }));
+
+  appendSetCookie(
+    res,
+    serializeCookie(req, cookieName(req, COOKIE_BASE.access), session.access_token, {
+      maxAge: remember ? accessMaxAge : undefined,
+    }),
+  );
+  appendSetCookie(
+    res,
+    serializeCookie(req, cookieName(req, COOKIE_BASE.refresh), session.refresh_token, {
+      maxAge: remember ? refreshMaxAge : undefined,
+    }),
+  );
+  appendSetCookie(
+    res,
+    serializeCookie(req, cookieName(req, COOKIE_BASE.remember), remember ? '1' : '0', {
+      maxAge: remember ? refreshMaxAge : undefined,
+    }),
+  );
 }
 
 export function clearSessionCookies(req: any, res: any) {
@@ -248,6 +318,17 @@ export function clearSessionCookies(req: any, res: any) {
 
 export function clearPkceCookie(req: any, res: any) {
   appendSetCookie(res, serializeCookie(req, cookieName(req, COOKIE_BASE.pkce), '', { clear: true }));
+}
+
+function setPkceCookie(req: any, res: any, verifier: string) {
+  appendSetCookie(
+    res,
+    serializeCookie(req, cookieName(req, COOKIE_BASE.pkce), verifier, {
+      maxAge: 10 * 60,
+      httpOnly: true,
+      sameSite: 'Lax',
+    }),
+  );
 }
 
 export function getCookieSession(req: any) {
@@ -262,39 +343,56 @@ export function getCookieSession(req: any) {
 export async function refreshCookieSession(req: any, res: any): Promise<AuthSession | null> {
   const { refreshToken, remember } = getCookieSession(req);
   if (!refreshToken) return null;
-  const { data, error } = await createRequestAuthClient().auth.refreshSession({ refresh_token: refreshToken });
+
+  const supabase = createRequestAuthClient();
+  const { data, error } = await supabase.auth.refreshSession({ refresh_token: refreshToken });
   if (error || !data.session) {
     clearSessionCookies(req, res);
     return null;
   }
+
   setSessionCookies(req, res, data.session, remember);
   return data.session;
 }
 
-export async function getValidatedSession(req: any, res: any): Promise<{ user: AuthUser; accessToken: string; expiresAt?: number } | null> {
+export async function getValidatedSession(
+  req: any,
+  res: any,
+): Promise<{ user: AuthUser; accessToken: string; expiresAt?: number } | null> {
   let { accessToken } = getCookieSession(req);
+  const supabase = createRequestAuthClient();
+
   if (accessToken) {
-    const { data, error } = await createRequestAuthClient().auth.getUser(accessToken);
-    if (!error && data.user) return { user: data.user, accessToken, expiresAt: jwtExpiry(accessToken) };
+    const { data, error } = await supabase.auth.getUser(accessToken);
+    if (!error && data.user) {
+      return {
+        user: data.user,
+        accessToken,
+        expiresAt: jwtExpiry(accessToken),
+      };
+    }
   }
 
   const refreshed = await refreshCookieSession(req, res);
   if (!refreshed) return null;
+
   accessToken = refreshed.access_token;
-  const { data, error } = await createRequestAuthClient().auth.getUser(accessToken);
+  const { data, error } = await supabase.auth.getUser(accessToken);
   if (error || !data.user) {
     clearSessionCookies(req, res);
     return null;
   }
-  return { user: data.user, accessToken, expiresAt: refreshed.expires_at || jwtExpiry(accessToken) };
+
+  return {
+    user: data.user,
+    accessToken,
+    expiresAt: refreshed.expires_at || jwtExpiry(accessToken),
+  };
 }
 
 export async function getProxyAccessToken(req: any, res: any): Promise<string | null> {
-  const current = getCookieSession(req);
-  if (current.accessToken) {
-    const exp = jwtExpiry(current.accessToken);
-    if (!exp || exp > Math.floor(Date.now() / 1000) + 30) return current.accessToken;
-  }
+  const { accessToken } = getCookieSession(req);
+  if (accessToken) return accessToken;
   const refreshed = await refreshCookieSession(req, res);
   return refreshed?.access_token || null;
 }
@@ -308,14 +406,18 @@ export async function revokeCurrentSession(req: any, res: any) {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
     } catch {
-      // Browser cookie removal below remains authoritative for this device.
+      // Browser cookie removal below is authoritative for local sign-out.
     }
   }
   clearSessionCookies(req, res);
 }
 
-function base64Url(input: Buffer) {
-  return input.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+function makePkceVerifier(): string {
+  return randomBytes(64).toString('base64url');
+}
+
+function makePkceChallenge(verifier: string): string {
+  return createHash('sha256').update(verifier).digest('base64url');
 }
 
 export function createPkceAuthClient(req: any, res: any) {
@@ -323,38 +425,73 @@ export function createPkceAuthClient(req: any, res: any) {
     auth: {
       async signInWithOAuth({ provider, options }: any) {
         try {
-          const verifier = base64Url(randomBytes(48));
-          const challenge = base64Url(createHash('sha256').update(verifier).digest());
-          appendSetCookie(res, serializeCookie(req, cookieName(req, COOKIE_BASE.pkce), verifier, { maxAge: 10 * 60 }));
+          const verifier = makePkceVerifier();
+          const challenge = makePkceChallenge(verifier);
+          setPkceCookie(req, res, verifier);
 
           const url = new URL(`${SUPABASE_URL}/auth/v1/authorize`);
-          url.searchParams.set('provider', provider);
-          url.searchParams.set('redirect_to', options?.redirectTo || `${requestOrigin(req)}/api/auth/google-callback`);
-          url.searchParams.set('flow_type', 'pkce');
+          url.searchParams.set('provider', String(provider || 'google'));
+          url.searchParams.set('redirect_to', String(options?.redirectTo || requestOrigin(req)));
           url.searchParams.set('code_challenge', challenge);
           url.searchParams.set('code_challenge_method', 's256');
-          if (options?.scopes) url.searchParams.set('scopes', options.scopes);
-          return { data: { provider, url: url.toString() }, error: null };
+
+          if (options?.scopes) url.searchParams.set('scopes', String(options.scopes));
+          if (options?.queryParams && typeof options.queryParams === 'object') {
+            for (const [key, value] of Object.entries(options.queryParams)) {
+              if (value != null) url.searchParams.set(key, String(value));
+            }
+          }
+
+          return {
+            data: { provider, url: url.toString() },
+            error: null,
+          };
         } catch (error: any) {
-          return { data: { provider, url: null }, error: { message: error?.message || 'Unable to start OAuth', status: 500 } };
+          clearPkceCookie(req, res);
+          return {
+            data: { provider, url: null },
+            error: { message: error?.message || 'Unable to start OAuth sign in', status: 500 },
+          };
         }
       },
 
       async exchangeCodeForSession(code: string) {
         const verifier = parseCookies(req)[cookieName(req, COOKIE_BASE.pkce)] || '';
-        if (!verifier) return { data: { user: null, session: null }, error: { message: 'Missing PKCE verifier', status: 400 } };
+        if (!code || !verifier) {
+          return {
+            data: { user: null, session: null },
+            error: { message: 'OAuth code verifier is missing or expired', status: 400 },
+          };
+        }
+
         try {
           const { response, payload } = await authFetch('/token?grant_type=pkce', {
             method: 'POST',
-            body: JSON.stringify({ auth_code: code, code_verifier: verifier }),
+            body: JSON.stringify({
+              auth_code: code,
+              code_verifier: verifier,
+            }),
           });
-          if (!response.ok) return { data: { user: null, session: null }, error: toAuthError(response.status, payload, 'Unable to complete OAuth') };
+
+          if (!response.ok) {
+            return {
+              data: { user: null, session: null },
+              error: toAuthError(response.status, payload, 'Unable to exchange OAuth code'),
+            };
+          }
+
           const session = normalizeSession(payload);
           return session
             ? { data: { user: session.user, session }, error: null }
-            : { data: { user: null, session: null }, error: toAuthError(502, payload, 'OAuth returned an invalid session') };
+            : {
+                data: { user: null, session: null },
+                error: toAuthError(502, payload, 'OAuth exchange returned an invalid session'),
+              };
         } catch (error: any) {
-          return { data: { user: null, session: null }, error: { message: error?.message || 'OAuth exchange unavailable', status: 503 } };
+          return {
+            data: { user: null, session: null },
+            error: { message: error?.message || 'OAuth exchange service unavailable', status: 503 },
+          };
         }
       },
     },
