@@ -1,3 +1,4 @@
+import { apiFetch } from '../services/api';
 import React, { useState } from 'react';
 import { ViewType, UserProfile } from '../types';
 import { NEBULA_LOGO_URL } from '../data/mockData';
@@ -123,7 +124,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
 
     try {
       // Trigger AI roadmap synthesis
-      await fetch('/api/ai/generate-roadmap', {
+      await apiFetch('/api/ai/generate-roadmap', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

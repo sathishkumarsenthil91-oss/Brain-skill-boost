@@ -1,3 +1,4 @@
+import { apiFetch } from './api';
 import { YouTubeLearningTrack, UnofficialLearningRecord, UserProfile } from '../types';
 
 // Curated starter learning tracks for software engineering students
@@ -130,7 +131,7 @@ export async function fetchYouTubeMetadataClient(videoId: string, originalUrl?: 
 
   // Tier 1: Try application backend endpoint
   try {
-    const res = await fetch('/api/youtube/metadata', {
+    const res = await apiFetch('/api/youtube/metadata', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ videoId, url: originalUrl || `https://www.youtube.com/watch?v=${videoId}` }),

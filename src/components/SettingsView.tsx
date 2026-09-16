@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import { supabase, reportServiceError } from '../supabaseClient';
+import React, { useState, useEffect } from 'react';
 import { AppSettings, UserProfile, ViewType } from '../types';
 import { initialAppSettings } from '../data/mockData';
 import { SupabaseDiagnosticsModal } from './SupabaseDiagnosticsModal';
@@ -17,6 +18,30 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onToggleDarkMode,
   onNavigate,
 }) => {
+  const columnName = (key: string) => key.replace(/[A-Z]/g, letter => '_' + letter.toLowerCase());
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const { data, error } = await supabase.from('app_settings').select('*').eq('user_id', session.user.id).maybeSingle();
+      if (error) throw error;
+      if (active && data) setSettings(previous => Object.fromEntries(Object.entries(previous).map(([key, value]) => [key, data[columnName(key)] ?? value])) as unknown as AppSettings);
+    })().catch(() => reportServiceError('Could not load your saved settings.'));
+    return () => { active = false; };
+  }, [user.id, user.email]);
+  const persistSettings = async (next: AppSettings) => {
+    setSavedSuccess(false);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Sign in to save settings.');
+      const values = Object.fromEntries(Object.entries(next).map(([key, value]) => [columnName(key), value]));
+      const { error } = await supabase.from('app_settings').upsert({ ...values, user_id: session.user.id }, { onConflict: 'user_id' });
+      if (error) throw error;
+      setSavedSuccess(true);
+      setTimeout(() => setSavedSuccess(false), 2500);
+    } catch { reportServiceError('Could not save your settings. Please try again.'); }
+  };
   const [settings, setSettings] = useState<AppSettings>(initialAppSettings);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
@@ -43,18 +68,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   };
 
   const handleToggle = (key: keyof AppSettings) => {
-    setSettings((prev) => {
-      const updated = { ...prev, [key]: !prev[key] };
-      return updated;
-    });
-    setSavedSuccess(true);
-    setTimeout(() => setSavedSuccess(false), 2000);
+    const next = { ...settings, [key]: !settings[key] };
+    setSettings(next);
+    void persistSettings(next);
   };
-
-  const handleSave = () => {
-    setSavedSuccess(true);
-    setTimeout(() => setSavedSuccess(false), 2500);
-  };
+  const handleSave = () => { void persistSettings(settings); };
 
   const handleResetData = () => {
     if (confirm('Are you sure you want to reset simulation data to initial state?')) {

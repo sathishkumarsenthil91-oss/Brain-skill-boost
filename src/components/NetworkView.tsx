@@ -90,6 +90,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
 
   // Real-Time Supabase Message & Broadcast Subscription Listener
   useEffect(() => {
+    connectivityService.fetchConversations(user).then(setConversations).catch(console.error);
     const unsubscribe = connectivityService.subscribeToRealtimeChat(
       user,
       (newMsg, participant) => {
@@ -466,6 +467,7 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
     setMessageInput('');
 
     // Send through connectivityService which broadcasts to Supabase Realtime and updates database
+    try {
     const { updatedConversations, newMsg } = await connectivityService.sendMessage(
       activeConversation.participant,
       userMsgContent,
@@ -476,52 +478,11 @@ export const NetworkView: React.FC<NetworkViewProps> = ({
     setActiveConversation((prev) =>
       prev ? { ...prev, lastMessage: userMsgContent, lastMessageTime: 'Just now', messages: [...prev.messages, newMsg] } : null
     );
-
-    // If talking with a mentor/recruiter profile, provide simulated contextual guidance if offline
-    if (activeConversation.participant.isMentor || activeConversation.participant.isRecruiter) {
-      setIsTypingReply(true);
-      setTimeout(() => {
-        const replyContent = generateSimulatedReply(activeConversation.participant, userMsgContent);
-        const replyMsg = {
-          id: `reply-${Date.now()}`,
-          senderId: activeConversation.participant.id,
-          receiverId: 'current-user',
-          content: replyContent,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          isRead: true,
-        };
-
-        setConversations((prevList) =>
-          prevList.map((conv) => {
-            if (conv.id === activeConversation.id) {
-              return {
-                ...conv,
-                lastMessage: replyContent,
-                lastMessageTime: 'Just now',
-                messages: [...conv.messages, replyMsg],
-              };
-            }
-            return conv;
-          })
-        );
-
-        setActiveConversation((prev) =>
-          prev ? { ...prev, lastMessage: replyContent, lastMessageTime: 'Just now', messages: [...prev.messages, replyMsg] } : null
-        );
-        setIsTypingReply(false);
-      }, 1800);
+    } catch (error: any) {
+      setMessageInput(userMsgContent);
+      showToast(error.message || 'Message could not be saved. Please try again.');
     }
-  };
 
-  const generateSimulatedReply = (participant: NetworkUser, prompt: string): string => {
-    const p = prompt.toLowerCase();
-    if (p.includes('intern') || p.includes('hire') || p.includes('job') || p.includes('referral')) {
-      return `Thanks for reaching out! Your verified track record and project credentials look strong. Make sure your GitHub repos have detailed architecture diagrams, and I'll highlight your application with our engineering hiring leads.`;
-    }
-    if (p.includes('cert') || p.includes('course') || p.includes('learn') || p.includes('study')) {
-      return `That's an impressive milestone! Continuous verified learning in production systems is the number one thing engineering teams value during technical evaluations. Keep it up!`;
-    }
-    return `Great point! I really appreciate the detailed engineering perspective. Let's keep in touch as new technical opportunities open up.`;
   };
 
   // Filtered Posts for Feed

@@ -57,6 +57,13 @@ function getViewFromLocation(): ViewType | null {
 }
 
 export default function App() {
+  const [serviceError, setServiceError] = useState('');
+  useEffect(() => {
+    const handleError = (event: Event) => setServiceError((event as CustomEvent<string>).detail);
+    window.addEventListener('service-error', handleError);
+    return () => window.removeEventListener('service-error', handleError);
+  }, []);
+
   // Check for existing saved session
   const [user, setUser] = useState<UserProfile>(() => {
     try {
@@ -130,12 +137,12 @@ export default function App() {
         if (Array.isArray(loadedSkills) && loadedSkills.length > 0) {
           setSkills(loadedSkills);
         }
-      });
+      }).catch(console.error);
       supabaseService.getUserRoadmap(user).then((loadedNodes) => {
         if (Array.isArray(loadedNodes) && loadedNodes.length > 0) {
           setRoadmapNodes(loadedNodes);
         }
-      });
+      }).catch(console.error);
     }
   }, [user.email, user.targetRole]);
 
@@ -143,6 +150,7 @@ export default function App() {
   useEffect(() => {
     // Check initial active session
     supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) { localStorage.removeItem('industryskill_auth_user'); setUser(initialUserProfile); setCurrentView('auth'); }
       if (session?.user) {
         const email = session.user.email || '';
         const meta = session.user.user_metadata || {};
@@ -161,6 +169,7 @@ export default function App() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT') { localStorage.removeItem('industryskill_auth_user'); setUser(initialUserProfile); setSkills([]); setRoadmapNodes([]); setCurrentView('auth'); }
       if ((event === 'SIGNED_IN' || event === 'USER_UPDATED') && session?.user) {
         const email = session.user.email || '';
         const meta = session.user.user_metadata || {};
@@ -294,6 +303,10 @@ export default function App() {
       if (dbProfile) {
         const merged: UserProfile = {
           ...nextUser,
+          id: dbProfile.id,
+          username: dbProfile.username,
+          userId: dbProfile.user_id_handle,
+          connectivitySetupCompleted: dbProfile.connectivity_setup_completed,
           name: dbProfile.name || nextUser.name,
           avatarUrl: dbProfile.avatar_url || nextUser.avatarUrl,
           college: dbProfile.college || nextUser.college,
@@ -355,6 +368,9 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#f8fafc] dark:bg-[#0b1329] text-[#0f172a] dark:text-[#f8fafc] transition-colors duration-200">
+      {serviceError && <div role="alert" className="fixed bottom-20 left-4 right-4 z-[100] rounded-xl bg-red-50 p-4 text-red-800 shadow-lg">
+        {serviceError}<button className="ml-4 underline" onClick={() => setServiceError('')}>Dismiss</button>
+      </div>}
       {/* Top Header Bar with Mega Menu */}
       <Header
         currentView={currentView}

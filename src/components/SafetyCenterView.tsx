@@ -1,3 +1,4 @@
+import { apiFetch } from '../services/api';
 import React, { useState } from 'react';
 import { ViewType, SafetyReport, SafetySignal } from '../types';
 import { defaultSafetyReport, sampleScamExamples } from '../data/mockData';
@@ -31,7 +32,7 @@ export const SafetyCenterView: React.FC<SafetyCenterViewProps> = ({
     setReportedSuccess(false);
 
     try {
-      const response = await fetch('/api/ai/scan-opportunity', {
+      const response = await apiFetch('/api/ai/scan-opportunity', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
