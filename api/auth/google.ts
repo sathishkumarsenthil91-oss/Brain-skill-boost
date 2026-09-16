@@ -1,4 +1,4 @@
-import { createPkceAuthClient, requestOrigin, setNoStore } from '../../server-lib/session';
+import { createPkceAuthClient, requestOrigin, setNoStore } from '../_lib/session.js';
 
 export default async function handler(req: any, res: any) {
   setNoStore(res);
@@ -6,8 +6,6 @@ export default async function handler(req: any, res: any) {
 
   try {
     const supabase = createPkceAuthClient(req, res);
-    // Use the app root because it is already the normal Supabase redirect target.
-    // The browser immediately forwards the one-time PKCE code to our server callback.
     const redirectTo = `${requestOrigin(req)}/?auth_callback=1`;
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
