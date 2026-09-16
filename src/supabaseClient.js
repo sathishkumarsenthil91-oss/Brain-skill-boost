@@ -12,6 +12,30 @@ const SUPABASE_PUBLIC_KEY =
 const APP_REQUEST_HEADER = { 'x-brainboost-request': '1' };
 const PROXY_PREFIXES = ['/rest/v1/', '/functions/v1/', '/storage/v1/'];
 
+// One-time cleanup from the old browser-persisted Supabase Auth model.
+// User profile/UI caches are intentionally kept; only auth token material is removed.
+function purgeLegacyBrowserAuthTokens() {
+  if (typeof window === 'undefined') return;
+  for (const store of [window.localStorage, window.sessionStorage]) {
+    try {
+      const keys = [];
+      for (let i = 0; i < store.length; i += 1) {
+        const key = store.key(i);
+        if (key) keys.push(key);
+      }
+      for (const key of keys) {
+        if (key.startsWith('sb-') && (key.includes('auth-token') || key.includes('code-verifier'))) {
+          store.removeItem(key);
+        }
+      }
+    } catch {
+      // Storage may be blocked by the browser; cookie auth still works.
+    }
+  }
+}
+
+purgeLegacyBrowserAuthTokens();
+
 export function reportServiceError(message) {
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('service-error', { detail: message }));
