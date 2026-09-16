@@ -1,4 +1,4 @@
-import { clearPkceCookie, createPkceAuthClient, requestOrigin, setNoStore, setSessionCookies } from '../../server-lib/session';
+import { clearPkceCookie, createPkceAuthClient, requestOrigin, setNoStore, setSessionCookies } from '../_lib/session.js';
 
 export default async function handler(req: any, res: any) {
   setNoStore(res);
