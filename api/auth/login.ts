@@ -1,4 +1,4 @@
-import { createRequestAuthClient, requireAppRequest, setNoStore, setSessionCookies } from '../../server-lib/session';
+import { createRequestAuthClient, requireAppRequest, setNoStore, setSessionCookies } from '../_lib/session.js';
 
 export default async function handler(req: any, res: any) {
   setNoStore(res);
