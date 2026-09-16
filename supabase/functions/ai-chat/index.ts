@@ -12,22 +12,32 @@ const json = (body: unknown, status = 200) =>
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const extractResponseText = (payload: any): string => {
-  const direct = typeof payload?.output_text === "string" ? payload.output_text.trim() : "";
-  if (direct) return direct;
+const extractChatText = (payload: any): string => {
+  const message = payload?.choices?.[0]?.message;
+  if (!message) return "";
 
-  const parts: string[] = [];
-  if (Array.isArray(payload?.output)) {
-    for (const item of payload.output) {
-      if (!item || item.type !== "message" || !Array.isArray(item.content)) continue;
-      for (const part of item.content) {
-        if (part?.type === "output_text" && typeof part.text === "string") {
-          parts.push(part.text);
-        }
-      }
-    }
+  if (typeof message.content === "string") {
+    const text = message.content.trim();
+    if (text) return text;
   }
-  return parts.join("").trim();
+
+  if (Array.isArray(message.content)) {
+    const parts = message.content
+      .map((part: any) => {
+        if (typeof part === "string") return part;
+        if (typeof part?.text === "string") return part.text;
+        return "";
+      })
+      .filter(Boolean);
+    const text = parts.join("").trim();
+    if (text) return text;
+  }
+
+  if (typeof message.refusal === "string" && message.refusal.trim()) {
+    return message.refusal.trim();
+  }
+
+  return "";
 };
 
 Deno.serve(async (req: Request) => {
@@ -105,7 +115,7 @@ Deno.serve(async (req: Request) => {
     });
     if (userInsertError) throw new Error("Could not save user message: " + userInsertError.message);
 
-    const instructions = [
+    const system = [
       "You are Nebula AI, BrainBoost's accurate and practical career and technical mentor.",
       "Answer the latest user message directly; do not repeat a previous answer unless asked.",
       "Use the supplied conversation history for continuity.",
@@ -114,14 +124,15 @@ Deno.serve(async (req: Request) => {
       "Mode: " + mode + ".",
     ].join(" ");
 
-    const input = [
+    const messages = [
+      { role: "system", content: system },
       ...history
         .filter((item: any) => item && typeof item.content === "string")
         .map((item: any) => ({
           role: item.role === "assistant" ? "assistant" : "user",
-          content: [{ type: "input_text", text: String(item.content) }],
+          content: String(item.content),
         })),
-      { role: "user", content: [{ type: "input_text", text: message }] },
+      { role: "user", content: message },
     ];
 
     const configuredModel = String(Deno.env.get("OPENAI_MODEL") || "").trim();
@@ -129,7 +140,7 @@ Deno.serve(async (req: Request) => {
     const model = allowedModels.has(configuredModel) ? configuredModel : "gpt-5.6-luna";
 
     const requestOpenAI = async () => {
-      const response = await fetch("https://api.openai.com/v1/responses", {
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         signal: AbortSignal.timeout(60000),
         headers: {
@@ -138,10 +149,7 @@ Deno.serve(async (req: Request) => {
         },
         body: JSON.stringify({
           model,
-          instructions,
-          input,
-          reasoning: { effort: "none" },
-          max_output_tokens: 1800,
+          messages,
         }),
       });
 
@@ -192,21 +200,16 @@ Deno.serve(async (req: Request) => {
       return json({ error, providerStatus, providerCode, providerRequestId }, 502);
     }
 
-    let content = extractResponseText(aiPayload);
-
-    if (!content && aiPayload?.status === "incomplete") {
-      const reason = String(aiPayload?.incomplete_details?.reason || "unknown");
-      console.error("OpenAI response incomplete", { reason, id: aiPayload?.id });
-      return json({ error: "AI response was incomplete", providerReason: reason }, 502);
-    }
+    const content = extractChatText(aiPayload);
 
     if (!content) {
-      console.error("OpenAI returned no text content", {
-        status: aiPayload?.status,
-        id: aiPayload?.id,
-        outputTypes: Array.isArray(aiPayload?.output) ? aiPayload.output.map((item: any) => item?.type) : [],
+      const finishReason = String(aiPayload?.choices?.[0]?.finish_reason || "unknown");
+      console.error("OpenAI chat completion returned no text", {
+        finishReason,
+        model: aiPayload?.model,
+        requestId: aiResponse.headers.get("x-request-id") || undefined,
       });
-      return json({ error: "AI provider returned an empty response" }, 502);
+      return json({ error: "AI provider returned an empty response", finishReason }, 502);
     }
 
     const modelUsed = String(aiPayload?.model || model);
