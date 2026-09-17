@@ -37,11 +37,25 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Ensure Android SDK 35
+      - name: Verify Android SDK
         shell: bash
         run: |
-          yes | sdkmanager --licenses >/dev/null 2>&1 || true
-          sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+          echo "ANDROID_HOME=${ANDROID_HOME:-not-set}"
+          if [ -n "${ANDROID_HOME:-}" ]; then
+            ls -1 "$ANDROID_HOME/platforms" 2>/dev/null | tail -n 10 || true
+          fi
+          SDKMANAGER=""
+          if [ -n "${ANDROID_HOME:-}" ] && [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+            SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          elif [ -n "${ANDROID_HOME:-}" ]; then
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager 2>/dev/null | head -n 1 || true)"
+          fi
+          if [ -n "$SDKMANAGER" ]; then
+            yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+            "$SDKMANAGER" 'platforms;android-35' 'build-tools;35.0.0' || true
+          else
+            echo 'sdkmanager not found on PATH; using the Android SDK preinstalled on the GitHub runner.'
+          fi
 
       - name: Download official Brain boost logo
         shell: bash
