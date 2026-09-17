@@ -6,7 +6,7 @@
     <title>Brain boost - AI Career & Learning Acceleration</title>
     <meta name="description" content="Brain boost is an AI-powered career readiness and learning platform with personalized skill gap roadmaps, verified opportunities, Connectivity professional networking, fraud detection, and Nebula AI advisor." />
     <meta name="application-name" content="Brain boost" />
-    <meta name="theme-color" content="#0b1020" />
+    <meta name="theme-color" content="#070b1a" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Brain boost" />
@@ -18,21 +18,27 @@
     <link rel="icon" type="image/webp" href="/brainboost-logo-192.webp" />
     <link rel="apple-touch-icon" href="/brainboost-logo-192.webp" />
 
-    <style>
-      /* Keep the existing component layout, but use the official Brain boost logo everywhere. */
-      #brainboost-brand-container > div:first-child {
-        background: url('/brainboost-logo-192.webp') center / contain no-repeat !important;
-        border-radius: 24%;
-      }
-      #brainboost-brand-container > div:first-child > svg,
-      #brainboost-brand-container > div:first-child > div {
-        display: none !important;
-      }
-    </style>
-
     <script>
-      (function() {
+      (function () {
         try {
+          var params = new URLSearchParams(window.location.search);
+
+          // OAuth completes in Chrome, then this callback sends the auth result
+          // back to the installed Android app. Query and hash are preserved.
+          if (params.get('native_oauth') === '1') {
+            params.delete('native_oauth');
+            var restQuery = params.toString();
+            var callback = 'brainboost://auth-callback' +
+              (restQuery ? '?' + restQuery : '') +
+              (window.location.hash || '');
+            window.location.replace(callback);
+            return;
+          }
+
+          if (/BrainBoostAndroid/i.test(navigator.userAgent)) {
+            document.documentElement.classList.add('native-app');
+          }
+
           var saved = localStorage.getItem('brainboost_theme') || localStorage.getItem('industryskill_theme');
           var isDark = saved === 'dark';
           if (!saved) {
@@ -46,6 +52,88 @@
         } catch (e) {}
       })();
     </script>
+
+    <style>
+      /* Official Brain boost logo used everywhere in the app. */
+      #brainboost-brand-container > div:first-child {
+        background: url('/brainboost-logo-192.webp') center / contain no-repeat !important;
+        border-radius: 24%;
+      }
+      #brainboost-brand-container > div:first-child > svg,
+      #brainboost-brand-container > div:first-child > div {
+        display: none !important;
+      }
+
+      /* Android app mode: denser spacing and true mobile-app proportions. */
+      html.native-app {
+        font-size: 14px;
+        width: 100%;
+        min-height: 100%;
+        background: #f8fafc;
+      }
+      html.native-app.dark {
+        background: #0b1329;
+      }
+      html.native-app,
+      html.native-app body,
+      html.native-app #root {
+        width: 100%;
+        min-height: 100dvh;
+        margin: 0;
+        overflow-x: hidden;
+      }
+      html.native-app body {
+        overscroll-behavior-y: none;
+        -webkit-tap-highlight-color: transparent;
+        touch-action: manipulation;
+      }
+
+      @media (max-width: 767px) {
+        html.native-app header.fixed.top-0 > div {
+          height: 3.65rem !important;
+          padding-left: 0.75rem !important;
+          padding-right: 0.75rem !important;
+        }
+        html.native-app #brainboost-brand-container {
+          gap: 0.45rem !important;
+        }
+        html.native-app #brainboost-brand-container > div:first-child {
+          width: 2.15rem !important;
+          height: 2.15rem !important;
+          min-width: 2.15rem !important;
+        }
+        html.native-app main {
+          padding-top: 4.35rem !important;
+          padding-left: 0.75rem !important;
+          padding-right: 0.75rem !important;
+          padding-bottom: 5.35rem !important;
+        }
+        html.native-app main > * + * {
+          margin-top: 1rem !important;
+        }
+        html.native-app main .rounded-3xl {
+          border-radius: 1.25rem !important;
+        }
+        html.native-app main .p-6 {
+          padding: 1rem !important;
+        }
+        html.native-app main .sm\:p-8 {
+          padding: 1rem !important;
+        }
+        html.native-app nav.fixed.bottom-0 {
+          border-radius: 1.15rem 1.15rem 0 0 !important;
+          padding-left: 0.35rem !important;
+          padding-right: 0.35rem !important;
+          box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.08) !important;
+        }
+        html.native-app nav.fixed.bottom-0 button {
+          min-width: 0 !important;
+          padding-left: 0.55rem !important;
+          padding-right: 0.55rem !important;
+        }
+      }
+    </style>
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
