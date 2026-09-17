@@ -100,11 +100,18 @@ function generateFallbackResponse(path: string, body: any): any {
       reply = `### 🎯 Coding & Technical Interview Preparation Strategy\n\n1. **Data Structures & Algorithms (DSA)**: Focus on high-frequency patterns (Two Pointers, Sliding Window, Fast & Slow Pointers, BFS/DFS on Trees and Graphs).\n2. **System Architecture**: Practice designing scalable systems (caching with Redis, database indexing, horizontal scaling, and microservices).\n3. **Behavioral & Communication**: Structure your answers with the STAR method (Situation, Task, Action, Result).\n4. **Live Coding Mindset**: Always communicate your thought process aloud before writing code, and consider edge cases early.`;
     }
 
+    const isUuid = typeof body?.sessionId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(body.sessionId);
+    const validSessionId = isUuid
+      ? body.sessionId
+      : (typeof crypto !== 'undefined' && crypto.randomUUID
+          ? crypto.randomUUID()
+          : '10000000-1000-4000-8000-100000000000');
+
     return {
       reply,
       content: reply,
       modelUsed: 'Nebula AI Core',
-      sessionId: body.sessionId || `session-${Date.now()}`,
+      sessionId: validSessionId,
     };
   }
 

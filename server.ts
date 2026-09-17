@@ -154,11 +154,14 @@ app.get('/api/auth/google', (req, res) => {
 
 // 1. Nebula AI Chat endpoint (with multilingual and mode support)
 app.post('/api/ai/chat', async (req, res) => {
-  const { message, history = [], thinkingMode = false, language = 'English', mode = 'career', userProfile, learningTracksContext } = req.body;
+  const { message, sessionId, history = [], thinkingMode = false, language = 'English', mode = 'career', userProfile, learningTracksContext } = req.body;
 
   if (!message) {
     return res.status(400).json({ error: 'Message is required' });
   }
+
+  const isUuid = typeof sessionId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(sessionId);
+  const activeSessionId = isUuid ? sessionId : crypto.randomUUID();
 
   let modeContext = '';
   if (mode === 'code') {
@@ -228,14 +231,14 @@ CORE LLM DIRECTIVES:
   });
 
   let reply = '';
-  let usedModel = thinkingMode ? 'gemini-3.5-flash-lite' : 'gemini-3.5-flash-lite';
+  let usedModel = thinkingMode ? 'gemini-3.8-flash' : 'gemini-3.8-flash';
 
-  // Tier 1: Try Gemini (Official high-speed models with gemini-3.5-flash-lite priority)
+  // Tier 1: Try Gemini (Official high-speed models with gemini-3.8-flash priority)
   try {
     const ai = getAIClient();
     const candidateModels = thinkingMode
-      ? ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.7-flash']
-      : ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-flash-latest'];
+      ? ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest']
+      : ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
 
     let geminiSuccess = false;
     for (const candidate of candidateModels) {
@@ -295,16 +298,20 @@ CORE LLM DIRECTIVES:
     modelUsed: usedModel,
     thinkingModeActive: thinkingMode,
     languageUsed: language,
+    sessionId: activeSessionId,
   });
 });
 
 // 1.1 Real-Time Streaming Chat Endpoint (Server-Sent Events)
 app.post('/api/ai/chat/stream', async (req, res) => {
-  const { message, history = [], thinkingMode = false, language = 'English', mode = 'career', userProfile, learningTracksContext } = req.body;
+  const { message, sessionId, history = [], thinkingMode = false, language = 'English', mode = 'career', userProfile, learningTracksContext } = req.body;
 
   if (!message) {
     return res.status(400).json({ error: 'Message is required' });
   }
+
+  const isUuid = typeof sessionId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(sessionId);
+  const activeSessionId = isUuid ? sessionId : crypto.randomUUID();
 
   // Set headers for Server-Sent Events (SSE)
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
@@ -382,12 +389,12 @@ CORE LLM DIRECTIVES:
 
   let streamCompleted = false;
 
-  // Tier 1: Try Gemini Streaming with high-speed gemini-3.5-flash-lite priority
+  // Tier 1: Try Gemini Streaming with high-speed gemini-3.8-flash priority
   try {
     const ai = getAIClient();
     const candidateModels = thinkingMode
-      ? ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.7-flash']
-      : ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-flash-latest'];
+      ? ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest']
+      : ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
 
     for (const candidate of candidateModels) {
       try {
@@ -637,9 +644,9 @@ Generate structured JSON containing:
     };
 
     let parsedSummary: any = null;
-    let usedModel = 'gemini-3.5-flash-lite';
+    let usedModel = 'gemini-3.8-flash';
 
-    const candidateModels = ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-flash-latest'];
+    const candidateModels = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
     let geminiSuccess = false;
 
     for (const candidate of candidateModels) {
@@ -808,7 +815,7 @@ app.post('/api/ai/translate', async (req, res) => {
   try {
     const ai = getAIClient();
     const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash-lite',
+      model: 'gemini-3.8-flash',
       contents: prompt,
       config: {
         systemInstruction: `You are a professional multilingual translator specialized in computer science and career guidance. Translate directly into ${targetLanguage} without preamble.`,
@@ -853,7 +860,7 @@ app.post('/api/ai/scan-opportunity', async (req, res) => {
       return res.status(400).json({ error: 'Please provide opportunity URL or content to scan.' });
     }
 
-    const model = useHighThinking ? 'gemini-3.5-flash-lite' : 'gemini-3.5-flash-lite';
+    const model = useHighThinking ? 'gemini-3.8-flash' : 'gemini-3.8-flash';
 
     const prompt = `Analyze this job posting, internship offer, or recruitment message for scams, red flags, unrealistic promises, and security risks.
 
@@ -874,8 +881,8 @@ Return a valid JSON object matching the exact schema.`;
     let usedModel = model;
 
     const candidateModels = useHighThinking
-      ? ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.7-flash']
-      : ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest'];
+      ? ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest']
+      : ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
 
     let geminiSuccess = false;
     const ai = getAIClient();
@@ -1032,7 +1039,7 @@ app.post('/api/ai/extract-skills', async (req, res) => {
     let skills: string[] = [];
 
     if (!skills || skills.length === 0) {
-      const candidateSkillModels = ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest'];
+      const candidateSkillModels = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
       const ai = getAIClient();
       for (const candidate of candidateSkillModels) {
         try {
@@ -1108,7 +1115,7 @@ Produce a detailed learning pathway containing:
 5. 3 recommended high-value projects and practice resources.`;
 
     let roadmapData: any = null;
-    const candidateRoadmapModels = ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.7-flash'];
+    const candidateRoadmapModels = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
     let geminiSuccess = false;
     const ai = getAIClient();
 

@@ -54,6 +54,15 @@ export const SUPPORTED_LANGUAGES: LanguageOption[] = [
   { code: 'Polish', name: 'Polish', native: 'Polski', flag: '🇵🇱', speechCode: 'pl-PL' },
 ];
 
+const isValidUuid = (val: unknown): val is string => {
+  return (
+    typeof val === 'string' &&
+    val !== 'undefined' &&
+    val !== 'null' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(val)
+  );
+};
+
 export const NebulaAIChat: React.FC<NebulaAIChatProps> = ({ user, onNavigate }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessions, setSessions] = useState<ChatSessionMeta[]>([]);
@@ -100,6 +109,23 @@ export const NebulaAIChat: React.FC<NebulaAIChatProps> = ({ user, onNavigate }) 
 
   // Restore chat messages for a specific session
   const restoreHistory = useCallback(async (id: string) => {
+    if (!id) {
+      setMessages([]);
+      return;
+    }
+
+    // If ID is not a valid UUID, don't query Supabase (prevents Postgres "invalid input syntax for type uuid" error)
+    if (!isValidUuid(id)) {
+      try {
+        const localStored = localStorage.getItem(`nebula_messages_${id}`);
+        if (localStored) {
+          setMessages(JSON.parse(localStored));
+          return;
+        }
+      } catch {}
+      return;
+    }
+
     setHistoryLoading(true);
     try {
       const { data, error } = await supabase
@@ -109,29 +135,48 @@ export const NebulaAIChat: React.FC<NebulaAIChatProps> = ({ user, onNavigate }) 
         .order('created_at', { ascending: false })
         .limit(100);
 
-      if (error) throw error;
+      if (error) {
+        console.warn('Supabase restoreHistory error, checking local storage:', error.message);
+        const localStored = localStorage.getItem(`nebula_messages_${id}`);
+        if (localStored) {
+          setMessages(JSON.parse(localStored));
+        }
+        return;
+      }
 
       if (data && data.length > 0) {
-        setMessages(
-          data.reverse().map((row) => ({
-            id: row.id,
-            role: row.role === 'user' ? 'user' : 'model',
-            content: row.content,
-            timestamp: new Date(row.created_at).toLocaleTimeString([], {
-              hour: '2-digit',
-              minute: '2-digit',
-            }),
-            modelUsed: row.model_used,
-            thinkingModeActive: row.thinking_mode_active,
-            language: row.language,
-          }))
-        );
+        const parsed = data.reverse().map((row) => ({
+          id: row.id,
+          role: (row.role === 'user' ? 'user' : 'model') as 'user' | 'model',
+          content: row.content,
+          timestamp: new Date(row.created_at).toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+          modelUsed: row.model_used,
+          thinkingModeActive: row.thinking_mode_active,
+          language: row.language,
+        }));
+        setMessages(parsed);
+        try {
+          localStorage.setItem(`nebula_messages_${id}`, JSON.stringify(parsed));
+        } catch {}
       } else {
-        setMessages([]);
+        const localStored = localStorage.getItem(`nebula_messages_${id}`);
+        if (localStored) {
+          setMessages(JSON.parse(localStored));
+        } else {
+          setMessages([]);
+        }
       }
     } catch (err: any) {
       console.warn('Error restoring chat history:', err);
-      setChatError(err.message || 'Unable to load chat history.');
+      try {
+        const localStored = localStorage.getItem(`nebula_messages_${id}`);
+        if (localStored) {
+          setMessages(JSON.parse(localStored));
+        }
+      } catch {}
     } finally {
       setHistoryLoading(false);
     }
@@ -140,41 +185,68 @@ export const NebulaAIChat: React.FC<NebulaAIChatProps> = ({ user, onNavigate }) 
   // Fetch all chat sessions for previous chat list
   const fetchSessions = useCallback(async (autoSelectLatest = false) => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
+      let remoteSessions: ChatSessionMeta[] = [];
 
-      const { data, error } = await supabase
-        .from('ai_chat_sessions')
-        .select('id, title, mode, created_at, updated_at')
-        .eq('user_id', session.user.id)
-        .order('updated_at', { ascending: false });
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const userId = session?.user?.id;
 
-      if (error) throw error;
+        if (userId && isValidUuid(userId)) {
+          const { data, error } = await supabase
+            .from('ai_chat_sessions')
+            .select('id, title, mode, created_at, updated_at')
+            .eq('user_id', userId)
+            .order('updated_at', { ascending: false });
 
-      if (data) {
-        const folderMap = JSON.parse(
-          localStorage.getItem(`nebula_folder_map_${user.id || 'guest'}`) || '{}'
-        );
-        const starredMap = JSON.parse(
-          localStorage.getItem(`nebula_starred_${user.id || 'guest'}`) || '{}'
-        );
+          if (!error && Array.isArray(data)) {
+            const folderMap = JSON.parse(
+              localStorage.getItem(`nebula_folder_map_${user.id || 'guest'}`) || '{}'
+            );
+            const starredMap = JSON.parse(
+              localStorage.getItem(`nebula_starred_${user.id || 'guest'}`) || '{}'
+            );
 
-        const mapped: ChatSessionMeta[] = data.map((d: any) => ({
-          id: d.id,
-          title: d.title || 'Conversation',
-          mode: d.mode,
-          created_at: d.created_at,
-          updated_at: d.updated_at,
-          folderId: folderMap[d.id] || null,
-          isStarred: !!starredMap[d.id],
-        }));
-
-        setSessions(mapped);
-
-        if (autoSelectLatest && mapped.length > 0) {
-          setSessionId(mapped[0].id);
-          await restoreHistory(mapped[0].id);
+            remoteSessions = data.map((d: any) => ({
+              id: d.id,
+              title: d.title || 'Conversation',
+              mode: d.mode,
+              created_at: d.created_at,
+              updated_at: d.updated_at,
+              folderId: folderMap[d.id] || null,
+              isStarred: !!starredMap[d.id],
+            }));
+          }
         }
+      } catch (authErr) {
+        console.warn('Supabase auth/session fetch skipped:', authErr);
+      }
+
+      // Merge with local sessions
+      let localSessions: ChatSessionMeta[] = [];
+      try {
+        const stored = localStorage.getItem(`nebula_sessions_${user.id || 'guest'}`);
+        if (stored) {
+          localSessions = JSON.parse(stored);
+        }
+      } catch {}
+
+      const sessionMap = new Map<string, ChatSessionMeta>();
+      for (const s of localSessions) {
+        if (s.id) sessionMap.set(s.id, s);
+      }
+      for (const s of remoteSessions) {
+        if (s.id) sessionMap.set(s.id, s);
+      }
+
+      const allSessions = Array.from(sessionMap.values()).sort(
+        (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+      );
+
+      setSessions(allSessions);
+
+      if (autoSelectLatest && allSessions.length > 0) {
+        setSessionId(allSessions[0].id);
+        await restoreHistory(allSessions[0].id);
       }
     } catch (err: any) {
       console.warn('Could not load chat sessions:', err);
@@ -301,7 +373,7 @@ export const NebulaAIChat: React.FC<NebulaAIChatProps> = ({ user, onNavigate }) 
     window.speechSynthesis.speak(utterance);
   };
 
-  // Send message using existing backend endpoint
+  // Send message using backend endpoint
   const handleSendMessage = async (textToSend?: string | unknown) => {
     const rawText = typeof textToSend === 'string' ? textToSend : inputMessage;
     const text = (typeof rawText === 'string' ? rawText : '').trim();
@@ -316,17 +388,72 @@ export const NebulaAIChat: React.FC<NebulaAIChatProps> = ({ user, onNavigate }) 
     setIsLoading(true);
     setInputMessage('');
 
+    // Ensure we have a valid UUID for the session
+    const currentSessionId =
+      sessionId && isValidUuid(sessionId)
+        ? sessionId
+        : (typeof crypto !== 'undefined' && crypto.randomUUID
+            ? crypto.randomUUID()
+            : '10000000-1000-4000-8000-100000000000');
+
+    setSessionId(currentSessionId);
+
     // Optimistically show user message immediately
-    const tempUserMsg: ChatMessage = {
-      id: `temp-${Date.now()}`,
+    const tempUserMsgId = `temp-${Date.now()}`;
+    const userMsg: ChatMessage = {
+      id: tempUserMsgId,
       role: 'user',
       content: text,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      mode: activeMode,
+      language: selectedLanguage,
     };
-    setMessages((prev) => [...prev, tempUserMsg]);
+
+    const updatedMessagesWithUser = [...messages, userMsg];
+    setMessages(updatedMessagesWithUser);
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
+
+    // Check if user is authenticated with a valid UUID in Supabase
+    let authUserId: string | null = null;
+    try {
+      const { data: authData } = await supabase.auth.getSession();
+      if (authData?.session?.user?.id && isValidUuid(authData.session.user.id)) {
+        authUserId = authData.session.user.id;
+      }
+    } catch {}
+
+    const sessionTitle = text.length > 55 ? text.slice(0, 52) + '...' : text;
+
+    // Persist user message to Supabase asynchronously if logged in
+    if (authUserId) {
+      (async () => {
+        try {
+          await supabase.from('ai_chat_sessions').upsert(
+            {
+              id: currentSessionId,
+              user_id: authUserId,
+              title: sessionTitle,
+              mode: activeMode,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: 'id' }
+          );
+
+          await supabase.from('ai_chat_messages').insert({
+            session_id: currentSessionId,
+            user_id: authUserId,
+            role: 'user',
+            content: text,
+            model_used: 'user',
+            language: selectedLanguage,
+          });
+        } catch (dbErr) {
+          console.warn('Supabase user message save error:', dbErr);
+        }
+      })();
+    }
 
     try {
       const response = await apiFetch('/api/ai/chat', {
@@ -334,7 +461,7 @@ export const NebulaAIChat: React.FC<NebulaAIChatProps> = ({ user, onNavigate }) 
         signal: controller.signal,
         body: JSON.stringify({
           message: text,
-          sessionId,
+          sessionId: currentSessionId,
           mode: activeMode,
           language: selectedLanguage,
           thinkingMode: isThinkingMode,
@@ -349,9 +476,84 @@ export const NebulaAIChat: React.FC<NebulaAIChatProps> = ({ user, onNavigate }) 
       });
 
       const data = await response.json();
-      setSessionId(data.sessionId);
-      await restoreHistory(data.sessionId);
-      // Refresh previous chat list so newly created sessions appear
+      const replyContent =
+        data.reply || data.content || 'I have analyzed your query and prepared guidance.';
+      const modelUsed = data.modelUsed || data.model || 'Nebula AI';
+
+      const assistantMsg: ChatMessage = {
+        id: `msg-${Date.now()}`,
+        role: 'model',
+        content: replyContent,
+        timestamp: new Date().toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+        modelUsed,
+        thinkingModeActive: isThinkingMode,
+        language: selectedLanguage,
+        mode: activeMode,
+      };
+
+      const finalMessages = [
+        ...updatedMessagesWithUser.map((m) =>
+          m.id === tempUserMsgId ? { ...m, id: `user-${Date.now()}` } : m
+        ),
+        assistantMsg,
+      ];
+      setMessages(finalMessages);
+
+      // Save to local cache
+      try {
+        localStorage.setItem(`nebula_messages_${currentSessionId}`, JSON.stringify(finalMessages));
+        const storedSessions: ChatSessionMeta[] = JSON.parse(
+          localStorage.getItem(`nebula_sessions_${user.id || 'guest'}`) || '[]'
+        );
+        const existingIdx = storedSessions.findIndex((s) => s.id === currentSessionId);
+        const metaItem: ChatSessionMeta = {
+          id: currentSessionId,
+          title: sessionTitle,
+          mode: activeMode,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          folderId: null,
+          isStarred: false,
+        };
+        if (existingIdx >= 0) {
+          storedSessions[existingIdx].updated_at = new Date().toISOString();
+        } else {
+          storedSessions.unshift(metaItem);
+        }
+        localStorage.setItem(
+          `nebula_sessions_${user.id || 'guest'}`,
+          JSON.stringify(storedSessions.slice(0, 50))
+        );
+      } catch (storageErr) {
+        console.warn('Local session storage save error:', storageErr);
+      }
+
+      // Persist assistant message to Supabase asynchronously if logged in
+      if (authUserId) {
+        (async () => {
+          try {
+            await supabase.from('ai_chat_messages').insert({
+              session_id: currentSessionId,
+              user_id: authUserId,
+              role: 'assistant',
+              content: replyContent,
+              model_used: modelUsed,
+              language: selectedLanguage,
+            });
+            await supabase
+              .from('ai_chat_sessions')
+              .update({ updated_at: new Date().toISOString() })
+              .eq('id', currentSessionId);
+          } catch (dbErr) {
+            console.warn('Supabase assistant message save error:', dbErr);
+          }
+        })();
+      }
+
+      // Refresh sidebar list
       fetchSessions(false);
     } catch (error: any) {
       setInputMessage(text);
@@ -439,14 +641,19 @@ export const NebulaAIChat: React.FC<NebulaAIChatProps> = ({ user, onNavigate }) 
     if (isLoading || historyLoading || !confirm('Clear current chat messages?')) return;
     try {
       if (sessionId) {
-        await supabase.from('ai_chat_sessions').delete().eq('id', sessionId);
+        if (isValidUuid(sessionId)) {
+          await supabase.from('ai_chat_sessions').delete().eq('id', sessionId);
+        }
+        localStorage.removeItem(`nebula_messages_${sessionId}`);
       }
       setSessionId(null);
       setMessages([]);
       setChatError('');
       fetchSessions(false);
     } catch {
-      setChatError('Could not clear chat history. Please try again.');
+      setSessionId(null);
+      setMessages([]);
+      setChatError('');
     }
   };
 
@@ -466,11 +673,19 @@ export const NebulaAIChat: React.FC<NebulaAIChatProps> = ({ user, onNavigate }) 
     await restoreHistory(id);
   };
 
-  // Rename a session (persisting via existing Supabase table)
+  // Rename a session (persisting via existing Supabase table and local storage)
   const handleRenameSession = async (id: string, newTitle: string) => {
     setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, title: newTitle } : s)));
     try {
-      await supabase.from('ai_chat_sessions').update({ title: newTitle }).eq('id', id);
+      if (isValidUuid(id)) {
+        await supabase.from('ai_chat_sessions').update({ title: newTitle }).eq('id', id);
+      }
+      const stored = localStorage.getItem(`nebula_sessions_${user.id || 'guest'}`);
+      if (stored) {
+        const list: ChatSessionMeta[] = JSON.parse(stored);
+        const updated = list.map((s) => (s.id === id ? { ...s, title: newTitle } : s));
+        localStorage.setItem(`nebula_sessions_${user.id || 'guest'}`, JSON.stringify(updated));
+      }
     } catch (err) {
       console.warn('Failed to update title in Supabase:', err);
     }
@@ -480,7 +695,16 @@ export const NebulaAIChat: React.FC<NebulaAIChatProps> = ({ user, onNavigate }) 
   const handleDeleteSession = async (id: string) => {
     setSessions((prev) => prev.filter((s) => s.id !== id));
     try {
-      await supabase.from('ai_chat_sessions').delete().eq('id', id);
+      if (isValidUuid(id)) {
+        await supabase.from('ai_chat_sessions').delete().eq('id', id);
+      }
+      localStorage.removeItem(`nebula_messages_${id}`);
+      const stored = localStorage.getItem(`nebula_sessions_${user.id || 'guest'}`);
+      if (stored) {
+        const list: ChatSessionMeta[] = JSON.parse(stored);
+        const updated = list.filter((s) => s.id !== id);
+        localStorage.setItem(`nebula_sessions_${user.id || 'guest'}`, JSON.stringify(updated));
+      }
     } catch (err) {
       console.warn('Failed to delete session in Supabase:', err);
     }
