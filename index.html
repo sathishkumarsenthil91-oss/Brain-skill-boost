@@ -23,8 +23,6 @@
         try {
           var params = new URLSearchParams(window.location.search);
 
-          // OAuth completes in Chrome, then this callback sends the auth result
-          // back to the installed Android app. Query and hash are preserved.
           if (params.get('native_oauth') === '1') {
             params.delete('native_oauth');
             var restQuery = params.toString();
@@ -54,7 +52,6 @@
     </script>
 
     <style>
-      /* Official Brain boost logo used everywhere in the app. */
       #brainboost-brand-container > div:first-child {
         background: url('/brainboost-logo-192.webp') center / contain no-repeat !important;
         border-radius: 24%;
@@ -64,12 +61,14 @@
         display: none !important;
       }
 
-      /* Android app mode: denser spacing and true mobile-app proportions. */
       html.native-app {
+        --native-safe-top: 0px;
+        --native-safe-bottom: 0px;
         font-size: 14px;
         width: 100%;
         min-height: 100%;
         background: #f8fafc;
+        overscroll-behavior: none;
       }
       html.native-app.dark {
         background: #0b1329;
@@ -80,56 +79,130 @@
         width: 100%;
         min-height: 100dvh;
         margin: 0;
-        overflow-x: hidden;
+        overflow-x: hidden !important;
       }
       html.native-app body {
-        overscroll-behavior-y: none;
+        overflow-y: auto !important;
+        overscroll-behavior-y: contain;
+        -webkit-overflow-scrolling: touch;
         -webkit-tap-highlight-color: transparent;
+        touch-action: pan-y pinch-zoom;
+      }
+      html.native-app #root {
+        overflow-y: visible !important;
+        position: relative;
+      }
+      html.native-app button,
+      html.native-app a,
+      html.native-app input,
+      html.native-app textarea,
+      html.native-app select {
         touch-action: manipulation;
       }
 
       @media (max-width: 767px) {
+        html.native-app header.fixed.top-0 {
+          top: 0 !important;
+          padding-top: var(--native-safe-top) !important;
+          box-sizing: border-box !important;
+          min-height: calc(3.65rem + var(--native-safe-top)) !important;
+        }
         html.native-app header.fixed.top-0 > div {
           height: 3.65rem !important;
           padding-left: 0.75rem !important;
           padding-right: 0.75rem !important;
         }
         html.native-app #brainboost-brand-container {
-          gap: 0.45rem !important;
+          gap: 0.4rem !important;
+          max-width: 12rem;
         }
         html.native-app #brainboost-brand-container > div:first-child {
-          width: 2.15rem !important;
-          height: 2.15rem !important;
-          min-width: 2.15rem !important;
+          width: 2.05rem !important;
+          height: 2.05rem !important;
+          min-width: 2.05rem !important;
         }
+        html.native-app #brainboost-brand-container span {
+          line-height: 1 !important;
+        }
+
         html.native-app main {
-          padding-top: 4.35rem !important;
-          padding-left: 0.75rem !important;
-          padding-right: 0.75rem !important;
-          padding-bottom: 5.35rem !important;
+          padding-top: calc(4.25rem + var(--native-safe-top)) !important;
+          padding-left: 0.7rem !important;
+          padding-right: 0.7rem !important;
+          padding-bottom: calc(5rem + var(--native-safe-bottom)) !important;
+          max-width: 100% !important;
+          overflow: visible !important;
         }
         html.native-app main > * + * {
-          margin-top: 1rem !important;
+          margin-top: 0.8rem !important;
         }
         html.native-app main .rounded-3xl {
-          border-radius: 1.25rem !important;
+          border-radius: 1.15rem !important;
         }
-        html.native-app main .p-6 {
-          padding: 1rem !important;
-        }
+        html.native-app main .p-6,
         html.native-app main .sm\:p-8 {
-          padding: 1rem !important;
+          padding: 0.9rem !important;
         }
+
+        html.native-app main > div:first-child {
+          padding: 0.95rem !important;
+        }
+        html.native-app main > div:first-child h1 {
+          font-size: 1.55rem !important;
+          line-height: 1.85rem !important;
+        }
+        html.native-app main > div:first-child p {
+          line-height: 1.45 !important;
+        }
+        html.native-app main > div:first-child .mt-6 {
+          margin-top: 0.9rem !important;
+        }
+        html.native-app main > div:first-child .pt-6 {
+          padding-top: 0.9rem !important;
+        }
+        html.native-app main > div:first-child .gap-3 {
+          gap: 0.55rem !important;
+        }
+        html.native-app main > div:first-child button {
+          min-height: 2.75rem;
+          padding-top: 0.6rem !important;
+          padding-bottom: 0.6rem !important;
+        }
+
+        html.native-app main > div:nth-of-type(2) {
+          padding: 0.9rem !important;
+        }
+        html.native-app main > div:nth-of-type(2) .grid {
+          gap: 0.65rem !important;
+        }
+        html.native-app main > div:nth-of-type(2) .grid > button {
+          min-height: 5.2rem !important;
+          padding: 0.65rem !important;
+          border-radius: 1rem !important;
+        }
+        html.native-app main > div:nth-of-type(2) .grid > button > div:first-child {
+          width: 2.35rem !important;
+          height: 2.35rem !important;
+          margin-bottom: 0.4rem !important;
+        }
+
         html.native-app nav.fixed.bottom-0 {
-          border-radius: 1.15rem 1.15rem 0 0 !important;
-          padding-left: 0.35rem !important;
-          padding-right: 0.35rem !important;
-          box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.08) !important;
+          border-radius: 1.05rem 1.05rem 0 0 !important;
+          padding-left: 0.25rem !important;
+          padding-right: 0.25rem !important;
+          padding-bottom: max(0.45rem, var(--native-safe-bottom)) !important;
+          box-shadow: 0 -7px 22px rgba(15, 23, 42, 0.08) !important;
         }
         html.native-app nav.fixed.bottom-0 button {
           min-width: 0 !important;
-          padding-left: 0.55rem !important;
-          padding-right: 0.55rem !important;
+          padding: 0.3rem 0.45rem !important;
+          border-radius: 0.8rem !important;
+        }
+        html.native-app nav.fixed.bottom-0 button .material-symbols-outlined {
+          font-size: 1.35rem !important;
+        }
+        html.native-app nav.fixed.bottom-0 button span:last-child {
+          font-size: 0.66rem !important;
         }
       }
     </style>
