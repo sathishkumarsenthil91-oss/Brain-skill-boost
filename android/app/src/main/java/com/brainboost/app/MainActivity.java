@@ -2,11 +2,15 @@ package com.brainboost.app;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.ActivityNotFoundException;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
-import android.graphics.Insets;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -15,6 +19,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.webkit.CookieManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -32,19 +37,24 @@ public class MainActivity extends Activity {
     private static final String APP_HOST = "backboost-skill1.vercel.app";
     private static final int FILE_CHOOSER_REQUEST = 1001;
     private static final int MICROPHONE_PERMISSION_REQUEST = 1002;
+    private static final int NOTIFICATION_PERMISSION_REQUEST = 1003;
+    private static final int RUNNING_NOTIFICATION_ID = 2201;
+    private static final String NOTIFICATION_CHANNEL_ID = "brainboost_running";
 
     private WebView webView;
     private View splashView;
     private ValueCallback<Uri[]> filePathCallback;
     private PermissionRequest pendingWebPermissionRequest;
+    private int safeTopDp = 0;
+    private int safeBottomDp = 0;
+    private boolean notificationPermissionRequested = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        getWindow().setStatusBarColor(Color.rgb(7, 11, 26));
-        getWindow().setNavigationBarColor(Color.rgb(7, 11, 26));
-        getWindow().getDecorView().setSystemUiVisibility(0);
+        configureEdgeToEdgeWindow();
+        createNotificationChannel();
 
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(Color.rgb(7, 11, 26));
@@ -53,6 +63,11 @@ public class MainActivity extends Activity {
         webView.setBackgroundColor(Color.rgb(248, 250, 252));
         webView.setAlpha(0f);
         webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        webView.setVerticalScrollBarEnabled(false);
+        webView.setHorizontalScrollBarEnabled(false);
+        webView.setNestedScrollingEnabled(true);
+        webView.setFocusable(true);
+        webView.setFocusableInTouchMode(true);
         root.addView(
                 webView,
                 new FrameLayout.LayoutParams(
@@ -67,7 +82,7 @@ public class MainActivity extends Activity {
                         ViewGroup.LayoutParams.MATCH_PARENT));
 
         setContentView(root);
-        applySystemBarInsets(root);
+        captureSystemBarInsets(root);
         configureWebView();
 
         if (savedInstanceState == null) {
@@ -78,6 +93,15 @@ public class MainActivity extends Activity {
             webView.restoreState(savedInstanceState);
             dismissSplash();
         }
+    }
+
+    private void configureEdgeToEdgeWindow() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            getWindow().setStatusBarColor(Color.TRANSPARENT);
+            getWindow().getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
+        }
+        getWindow().setNavigationBarColor(Color.WHITE);
     }
 
     private View buildSplashView() {
@@ -120,26 +144,32 @@ public class MainActivity extends Activity {
         return layout;
     }
 
-    private void applySystemBarInsets(View root) {
+    private void captureSystemBarInsets(View root) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             root.setOnApplyWindowInsetsListener((view, insets) -> {
-                int top = 0;
-                int bottom = 0;
-
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    Insets bars = insets.getInsets(WindowInsets.Type.systemBars());
-                    top = bars.top;
-                    bottom = bars.bottom;
-                } else {
-                    top = insets.getSystemWindowInsetTop();
-                    bottom = insets.getSystemWindowInsetBottom();
-                }
-
-                view.setPadding(0, top, 0, bottom);
+                int topPx = insets.getSystemWindowInsetTop();
+                int bottomPx = insets.getSystemWindowInsetBottom();
+                float density = getResources().getDisplayMetrics().density;
+                safeTopDp = Math.max(0, Math.round(topPx / density));
+                safeBottomDp = Math.max(0, Math.round(bottomPx / density));
+                pushSafeAreaToWeb();
                 return insets;
             });
             root.requestApplyInsets();
         }
+    }
+
+    private void pushSafeAreaToWeb() {
+        if (webView == null) return;
+        final int top = safeTopDp;
+        final int bottom = safeBottomDp;
+        webView.post(() -> webView.evaluateJavascript(
+                "(function(){" +
+                        "var d=document.documentElement;" +
+                        "d.style.setProperty('--native-safe-top','" + top + "px');" +
+                        "d.style.setProperty('--native-safe-bottom','" + bottom + "px');" +
+                        "})();",
+                null));
     }
 
     private int dp(int value) {
@@ -156,13 +186,13 @@ public class MainActivity extends Activity {
         settings.setAllowContentAccess(true);
         settings.setJavaScriptCanOpenWindowsAutomatically(true);
         settings.setMediaPlaybackRequiresUserGesture(false);
-        settings.setUseWideViewPort(true);
+        settings.setUseWideViewPort(false);
         settings.setLoadWithOverviewMode(false);
         settings.setBuiltInZoomControls(false);
         settings.setDisplayZoomControls(false);
         settings.setSupportZoom(false);
         settings.setTextZoom(100);
-        settings.setUserAgentString(settings.getUserAgentString() + " BrainBoostAndroid/2.0");
+        settings.setUserAgentString(settings.getUserAgentString() + " BrainBoostAndroid/3.0");
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
@@ -174,11 +204,16 @@ public class MainActivity extends Activity {
             cookieManager.setAcceptThirdPartyCookies(webView, true);
         }
 
+        webView.addJavascriptInterface(new NativeBridge(), "BrainBoostNative");
+
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
+                pushSafeAreaToWeb();
+                installNativeThemeBridge();
                 dismissSplash();
+                ensureRunningNotification();
             }
 
             @Override
@@ -231,6 +266,41 @@ public class MainActivity extends Activity {
         });
     }
 
+    private void installNativeThemeBridge() {
+        if (webView == null) return;
+        String script =
+                "(function(){" +
+                        "if(window.__brainBoostNativeThemeObserver)return;" +
+                        "var d=document.documentElement;" +
+                        "var send=function(){try{BrainBoostNative.setDarkMode(d.classList.contains('dark'));}catch(e){}};" +
+                        "window.__brainBoostNativeThemeObserver=new MutationObserver(send);" +
+                        "window.__brainBoostNativeThemeObserver.observe(d,{attributes:true,attributeFilter:['class']});" +
+                        "send();" +
+                        "})();";
+        webView.evaluateJavascript(script, null);
+    }
+
+    private class NativeBridge {
+        @JavascriptInterface
+        public void setDarkMode(boolean darkMode) {
+            runOnUiThread(() -> applySystemBarTheme(darkMode));
+        }
+    }
+
+    private void applySystemBarTheme(boolean darkMode) {
+        int flags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN;
+        if (!darkMode && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            flags |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+        }
+        if (!darkMode && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            flags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+        }
+        getWindow().getDecorView().setSystemUiVisibility(flags);
+        getWindow().setStatusBarColor(Color.TRANSPARENT);
+        getWindow().setNavigationBarColor(
+                darkMode ? Color.rgb(7, 11, 26) : Color.WHITE);
+    }
+
     private void dismissSplash() {
         if (webView != null && webView.getAlpha() == 0f) {
             webView.animate().alpha(1f).setDuration(180).start();
@@ -247,6 +317,76 @@ public class MainActivity extends Activity {
                     })
                     .start();
         }
+    }
+
+    private void createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel channel = new NotificationChannel(
+                    NOTIFICATION_CHANNEL_ID,
+                    "Brain boost activity",
+                    NotificationManager.IMPORTANCE_LOW);
+            channel.setDescription("Shows when Brain boost is active");
+            channel.setSound(null, null);
+            channel.enableVibration(false);
+            NotificationManager manager =
+                    (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            if (manager != null) manager.createNotificationChannel(channel);
+        }
+    }
+
+    private void ensureRunningNotification() {
+        if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+            if (!notificationPermissionRequested) {
+                notificationPermissionRequested = true;
+                requestPermissions(
+                        new String[]{Manifest.permission.POST_NOTIFICATIONS},
+                        NOTIFICATION_PERMISSION_REQUEST);
+            }
+            return;
+        }
+        showRunningNotification();
+    }
+
+    private void showRunningNotification() {
+        Intent openAppIntent = new Intent(this, MainActivity.class);
+        openAppIntent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        PendingIntent pendingIntent = PendingIntent.getActivity(
+                this,
+                0,
+                openAppIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
+        Notification.Builder builder;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            builder = new Notification.Builder(this, NOTIFICATION_CHANNEL_ID);
+        } else {
+            builder = new Notification.Builder(this);
+            builder.setPriority(Notification.PRIORITY_LOW);
+        }
+
+        Notification notification = builder
+                .setSmallIcon(android.R.drawable.ic_media_play)
+                .setContentTitle("Brain boost is running")
+                .setContentText("Tap to return to your learning dashboard")
+                .setContentIntent(pendingIntent)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setAutoCancel(false)
+                .setCategory(Notification.CATEGORY_STATUS)
+                .setVisibility(Notification.VISIBILITY_PRIVATE)
+                .build();
+
+        NotificationManager manager =
+                (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        if (manager != null) manager.notify(RUNNING_NOTIFICATION_ID, notification);
+    }
+
+    private void cancelRunningNotification() {
+        NotificationManager manager =
+                (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        if (manager != null) manager.cancel(RUNNING_NOTIFICATION_ID);
     }
 
     private boolean handleUri(Uri uri) {
@@ -313,7 +453,8 @@ public class MainActivity extends Activity {
         }
 
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M
-                || checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                || checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                == PackageManager.PERMISSION_GRANTED) {
             request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
             return;
         }
@@ -347,13 +488,21 @@ public class MainActivity extends Activity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
 
         if (requestCode == MICROPHONE_PERMISSION_REQUEST && pendingWebPermissionRequest != null) {
-            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            if (grantResults.length > 0
+                    && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 pendingWebPermissionRequest.grant(
                         new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
             } else {
                 pendingWebPermissionRequest.deny();
             }
             pendingWebPermissionRequest = null;
+        }
+
+        if (requestCode == NOTIFICATION_PERMISSION_REQUEST) {
+            if (grantResults.length > 0
+                    && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                showRunningNotification();
+            }
         }
     }
 
@@ -374,8 +523,10 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        cancelRunningNotification();
         if (webView != null) {
             webView.stopLoading();
+            webView.removeJavascriptInterface("BrainBoostNative");
             webView.setWebChromeClient(null);
             webView.setWebViewClient(null);
             webView.destroy();
