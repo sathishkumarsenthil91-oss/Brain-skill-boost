@@ -43,15 +43,26 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLIC_KEY, {
   },
 });
 
-// The Android app intentionally opens Google OAuth in the system browser because
-// Google blocks many embedded WebView sign-ins. After authentication, the browser
-// lands on our HTTPS callback and index.html immediately deep-links back into the
-// installed Brain boost app with the auth token/code intact.
+// Native Android OAuth bridge.
+// Google authentication stays in the secure system browser, then returns to the
+// installed app through brainboost://auth-callback. For Google we always request
+// the account chooser so logout -> login can use a different Google account.
 if (typeof window !== 'undefined' && /BrainBoostAndroid/i.test(navigator.userAgent)) {
   const originalSignInWithOAuth = supabase.auth.signInWithOAuth.bind(supabase.auth);
+
   supabase.auth.signInWithOAuth = (credentials) => {
+    const originalOptions = credentials?.options || {};
+    const queryParams = {
+      ...(originalOptions.queryParams || {}),
+    };
+
+    if (credentials?.provider === 'google') {
+      queryParams.prompt = 'select_account';
+    }
+
     const options = {
-      ...(credentials?.options || {}),
+      ...originalOptions,
+      queryParams,
       redirectTo: `${window.location.origin}/?native_oauth=1`,
     };
 
