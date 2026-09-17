@@ -6,11 +6,11 @@
     <title>Brain boost - AI Career & Learning Acceleration</title>
     <meta name="description" content="Brain boost is an AI-powered career readiness and learning platform with personalized skill gap roadmaps, verified opportunities, Connectivity professional networking, fraud detection, and Nebula AI advisor." />
     <meta name="application-name" content="Brain boost" />
-    <meta name="theme-color" content="#070b1a" />
+    <meta name="theme-color" content="#ffffff" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Brain boost" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta property="og:title" content="Brain boost - AI Career & Learning Acceleration" />
     <meta property="og:description" content="Brain boost is an AI-powered career readiness and learning platform with personalized skill gap roadmaps, verified opportunities, Connectivity professional networking, fraud detection, and Nebula AI advisor." />
     <meta property="og:image" content="https://backboost-skill1.vercel.app/brainboost-logo-512.webp" />
@@ -62,13 +62,12 @@
       }
 
       html.native-app {
-        --native-safe-top: 0px;
-        --native-safe-bottom: 0px;
         font-size: 14px;
         width: 100%;
         min-height: 100%;
         background: #f8fafc;
         overscroll-behavior: none;
+        scroll-behavior: auto !important;
       }
       html.native-app.dark {
         background: #0b1329;
@@ -83,14 +82,38 @@
       }
       html.native-app body {
         overflow-y: auto !important;
-        overscroll-behavior-y: contain;
+        overscroll-behavior-y: none;
         -webkit-overflow-scrolling: touch;
         -webkit-tap-highlight-color: transparent;
-        touch-action: pan-y pinch-zoom;
+        touch-action: pan-y;
+        scroll-behavior: auto !important;
       }
       html.native-app #root {
         overflow-y: visible !important;
         position: relative;
+      }
+
+      /* Performance mode for Android WebView. Heavy blur/long animations are the
+         main source of jank on lower and mid-range phones. */
+      html.native-app [class*="backdrop-blur"],
+      html.native-app header,
+      html.native-app nav.fixed.bottom-0 {
+        -webkit-backdrop-filter: none !important;
+        backdrop-filter: none !important;
+      }
+      html.native-app [class*="transition-"] {
+        transition-duration: 80ms !important;
+        transition-delay: 0ms !important;
+      }
+      html.native-app [class*="animate-"]:not(.animate-spin) {
+        animation-duration: 1ms !important;
+        animation-delay: 0ms !important;
+        animation-iteration-count: 1 !important;
+      }
+      html.native-app .shadow-2xl,
+      html.native-app .shadow-xl,
+      html.native-app .shadow-lg {
+        box-shadow: 0 3px 12px rgba(15, 23, 42, 0.08) !important;
       }
       html.native-app button,
       html.native-app a,
@@ -103,9 +126,9 @@
       @media (max-width: 767px) {
         html.native-app header.fixed.top-0 {
           top: 0 !important;
-          padding-top: var(--native-safe-top) !important;
+          padding-top: 0 !important;
+          min-height: 3.65rem !important;
           box-sizing: border-box !important;
-          min-height: calc(3.65rem + var(--native-safe-top)) !important;
         }
         html.native-app header.fixed.top-0 > div {
           height: 3.65rem !important;
@@ -126,12 +149,13 @@
         }
 
         html.native-app main {
-          padding-top: calc(4.25rem + var(--native-safe-top)) !important;
+          padding-top: 4.25rem !important;
           padding-left: 0.7rem !important;
           padding-right: 0.7rem !important;
-          padding-bottom: calc(5rem + var(--native-safe-bottom)) !important;
+          padding-bottom: 5rem !important;
           max-width: 100% !important;
           overflow: visible !important;
+          scroll-behavior: auto !important;
         }
         html.native-app main > * + * {
           margin-top: 0.8rem !important;
@@ -190,8 +214,8 @@
           border-radius: 1.05rem 1.05rem 0 0 !important;
           padding-left: 0.25rem !important;
           padding-right: 0.25rem !important;
-          padding-bottom: max(0.45rem, var(--native-safe-bottom)) !important;
-          box-shadow: 0 -7px 22px rgba(15, 23, 42, 0.08) !important;
+          padding-bottom: 0.45rem !important;
+          box-shadow: 0 -3px 12px rgba(15, 23, 42, 0.07) !important;
         }
         html.native-app nav.fixed.bottom-0 button {
           min-width: 0 !important;
