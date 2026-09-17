@@ -1,0 +1,66 @@
+name: Build Brain boost APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'android/**'
+      - '.github/workflows/build-brain-boost-apk.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Ensure Android SDK 35
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+
+      - name: Download official Brain boost logo
+        shell: bash
+        run: |
+          mkdir -p android/app/src/main/res/drawable-nodpi
+          curl --fail --location --retry 4 \
+            'https://backboost-skill1.vercel.app/brainboost-logo-512.webp' \
+            --output android/app/src/main/res/drawable-nodpi/brainboost_icon.webp
+
+      - name: Build installable debug APK
+        working-directory: android
+        run: gradle :app:assembleDebug --stacktrace
+
+      - name: Prepare APK file
+        shell: bash
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk Brain-boost.apk
+          sha256sum Brain-boost.apk > Brain-boost.apk.sha256
+
+      - name: Upload Brain boost APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Brain-boost-APK
+          path: |
+            Brain-boost.apk
+            Brain-boost.apk.sha256
+          if-no-files-found: error
+          retention-days: 30
