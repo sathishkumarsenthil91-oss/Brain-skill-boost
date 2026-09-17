@@ -46,9 +46,14 @@ export const SafetyCenterView: React.FC<SafetyCenterViewProps> = ({
       if (data?.report) {
         setReport(data.report);
         setHasScanned(true);
+      } else {
+        setReport(defaultSafetyReport);
+        setHasScanned(true);
       }
-    } catch (err) {
-      console.error('Scan error:', err);
+    } catch (err: any) {
+      console.warn('Opportunity scan fallback applied:', err?.message || err);
+      setReport(defaultSafetyReport);
+      setHasScanned(true);
     } finally {
       setIsScanning(false);
     }

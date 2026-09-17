@@ -143,6 +143,15 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
 });
 
+// Legacy Auth compatibility endpoints (Auth is handled client-side via Supabase)
+app.get('/api/auth/session', (req, res) => {
+  res.json({ session: null, user: null, message: 'Authentication is managed directly via Supabase client' });
+});
+
+app.get('/api/auth/google', (req, res) => {
+  res.redirect('/?auth=google');
+});
+
 // 1. Nebula AI Chat endpoint (with multilingual and mode support)
 app.post('/api/ai/chat', async (req, res) => {
   const { message, history = [], thinkingMode = false, language = 'English', mode = 'career', userProfile, learningTracksContext } = req.body;
