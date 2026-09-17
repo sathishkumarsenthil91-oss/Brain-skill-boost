@@ -22,7 +22,7 @@ export interface YouTubePlayerProps {
  * - Strictly enforces referrerPolicy="strict-origin-when-cross-origin" to fix Vercel/custom domain embed errors
  * - Graceful error recovery with retry and direct YouTube fallback option
  */
-export const YouTubePlayer: React.FC<YouTubePlayerProps> = React.memo(({
+const YouTubePlayerComponent: React.FC<YouTubePlayerProps> = ({
   videoId,
   title = 'YouTube Video Player',
   autoPlay = true,
@@ -243,6 +243,7 @@ export const YouTubePlayer: React.FC<YouTubePlayerProps> = React.memo(({
       )}
     </div>
   );
-});
+};
 
+export const YouTubePlayer = React.memo(YouTubePlayerComponent);
 YouTubePlayer.displayName = 'YouTubePlayer';

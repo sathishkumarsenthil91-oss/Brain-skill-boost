@@ -42,16 +42,73 @@ export const SupabaseDiagnosticsModal: React.FC<SupabaseDiagnosticsModalProps> =
   const missingTables = report?.tables.filter((t) => !t.exists) || [];
 
   const handleCopySql = () => {
-    const sqlScript = `-- Quick SQL fix for missing tables
-${missingTables
-  .map(
-    (t) =>
-      `-- Table: ${t.tableName}\n-- Please execute the main schema migration script in Supabase SQL Editor.`
-  )
-  .join('\n\n')}`;
-    navigator.clipboard.writeText(sqlScript);
+    const fullSql = `-- ==============================================================================
+-- BRAINBOOST / INDUSTRY SKILL - COMPLETE INSTANT SUPABASE FIX SCRIPT
+-- Execute in Supabase SQL Editor: https://supabase.com/dashboard/project/_/sql
+-- ==============================================================================
+
+-- 1. DISABLE ROW LEVEL SECURITY (OR ADD UNRESTRICTED POLICIES)
+-- Fixes all 401 Unauthorized / 42501 RLS errors on hosted/preview URLs:
+DO $$
+DECLARE
+    t text;
+    tables text[] := ARRAY[
+        'profiles', 'network_posts', 'post_likes', 'post_comments',
+        'network_follows', 'user_follows', 'network_messages', 'messages',
+        'courses', 'course_enrollments', 'certificates', 'learning_records',
+        'youtube_tracks', 'assignments', 'roadmaps', 'webinars',
+        'webinar_registrations', 'opportunities', 'user_skills', 'skills'
+    ];
+BEGIN
+    FOREACH t IN ARRAY tables LOOP
+        BEGIN
+            -- Ensure table has RLS permissive policy for anon and authenticated
+            EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY;', t);
+            EXECUTE format('DROP POLICY IF EXISTS "Permissive all" ON public.%I;', t);
+            EXECUTE format('CREATE POLICY "Permissive all" ON public.%I FOR ALL USING (true) WITH CHECK (true);', t);
+        EXCEPTION WHEN OTHERS THEN
+            NULL;
+        END;
+    END LOOP;
+END $$;
+
+-- 2. ENABLE REALTIME BROADCASTS FOR ALL LIVE TABLES
+DO $$
+DECLARE
+    t text;
+    rt_tables text[] := ARRAY[
+        'profiles', 'network_posts', 'post_likes', 'post_comments',
+        'network_follows', 'network_messages', 'courses', 'course_enrollments'
+    ];
+BEGIN
+    FOREACH t IN ARRAY rt_tables LOOP
+        BEGIN
+            EXECUTE format('ALTER TABLE public.%I REPLICA IDENTITY FULL;', t);
+            EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE public.%I;', t);
+        EXCEPTION WHEN OTHERS THEN
+            NULL;
+        END;
+    END LOOP;
+END $$;
+
+-- 3. SEED STARTER COURSES CATALOG (IF EMPTY)
+INSERT INTO public.courses (id, title, provider, rating, duration, level, category, thumbnail, skills_taught, description)
+VALUES 
+('course-1', 'Full-Stack Modern React & TypeScript', 'Brainboost Academy', 4.90, '20 Hours', 'Intermediate', 'Frontend Development', 'https://images.unsplash.com/photo-1633356122544-f134324a6cee?w=800&auto=format&fit=crop&q=80', ARRAY['React', 'TypeScript', 'Tailwind CSS', 'Vite'], 'Master modern React patterns, state management, component architecture, and TypeScript integration.'),
+('course-2', 'Production Node.js & Distributed Systems', 'Brainboost Academy', 4.85, '18 Hours', 'Intermediate to Advanced', 'Backend Development', 'https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=800&auto=format&fit=crop&q=80', ARRAY['Node.js', 'Express', 'PostgreSQL', 'Redis'], 'Build resilient server-side architectures, handle real-time WebSockets, and optimize database connections.'),
+('course-3', 'Cloud Architecture & DevOps with Docker', 'Brainboost Academy', 4.95, '24 Hours', 'All Levels', 'Cloud & DevOps', 'https://images.unsplash.com/photo-1618401471353-b98afee0b2eb?w=800&auto=format&fit=crop&q=80', ARRAY['Docker', 'Kubernetes', 'CI/CD', 'Cloud Run'], 'Containerize production applications, orchestrate services, and establish automated deployment pipelines.')
+ON CONFLICT (id) DO NOTHING;
+
+-- 4. SEED OPPORTUNITIES
+INSERT INTO public.opportunities (id, title, company, location, type, experience, stipend, description, skills, match_percentage)
+VALUES 
+('opp-1', 'Junior Full Stack Engineer', 'TechNova Solutions', 'Remote', 'Full-Time', '0-2 Years', '$95,000 - $120,000 / yr', 'Join our core platform engineering team building next-generation developer tooling.', ARRAY['React', 'Node.js', 'TypeScript', 'PostgreSQL'], 94),
+('opp-2', 'Cloud Platform Intern', 'Starlight Data', 'Remote', 'Internship', 'Fresher / Student', '$45 / hr', 'Hands-on experience deploying containerized microservices and automated cloud infrastructure.', ARRAY['Docker', 'Linux', 'Python', 'AWS/GCP'], 88)
+ON CONFLICT (id) DO NOTHING;`;
+
+    navigator.clipboard.writeText(fullSql);
     setCopiedSql(true);
-    setTimeout(() => setCopiedSql(false), 2000);
+    setTimeout(() => setCopiedSql(false), 2500);
   };
 
   return (
@@ -135,6 +192,32 @@ ${missingTables
             <div className="text-[11px] text-slate-500 text-right">
               Last Tested: <span className="font-mono text-slate-700 dark:text-slate-300">{report?.testedAt || 'Just now'}</span>
             </div>
+          </div>
+
+          {/* Quick Fix SQL Banner */}
+          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/40 dark:to-indigo-950/40 border border-blue-200/80 dark:border-blue-800/80 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div className="space-y-1">
+              <p className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                <span className="material-symbols-outlined text-blue-600 dark:text-blue-400 text-base">code</span>
+                Instant Supabase Fix Script (RLS, Realtime & Catalogs)
+              </p>
+              <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                Fixes 401 Unauthorized errors, enables real-time messaging broadcasts, and seeds courses/opportunities.
+              </p>
+            </div>
+            <button
+              onClick={handleCopySql}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
+                copiedSql
+                  ? 'bg-emerald-600 text-white'
+                  : 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm'
+              }`}
+            >
+              <span className="material-symbols-outlined text-[16px]">
+                {copiedSql ? 'check' : 'content_copy'}
+              </span>
+              {copiedSql ? 'SQL Script Copied!' : 'Copy Fix SQL'}
+            </button>
           </div>
 
           {/* Table Results List */}

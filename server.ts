@@ -1,9 +1,9 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import dotenv from 'dotenv';
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 import OpenAI from 'openai';
-import { createServer as createViteServer } from 'vite';
 
 dotenv.config();
 
@@ -1260,17 +1260,43 @@ Produce a detailed learning pathway containing:
 
 // Vite middleware for development & static serving for production
 async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
+  const distCandidates = [
+    typeof __dirname !== 'undefined' ? path.join(__dirname, 'index.html') : '',
+    path.join(process.cwd(), 'dist', 'index.html'),
+  ];
+  const foundIndexHtml = distCandidates.find((p) => p && fs.existsSync(p));
+  const distDir = foundIndexHtml ? path.dirname(foundIndexHtml) : path.join(process.cwd(), 'dist');
+
+  const isProduction =
+    process.env.NODE_ENV === 'production' ||
+    Boolean(foundIndexHtml && (typeof __filename !== 'undefined' && __filename.endsWith('.cjs')));
+
+  if (!isProduction) {
+    try {
+      const { createServer: createViteServer } = await import('vite');
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: 'spa',
+      });
+      app.use(vite.middlewares);
+    } catch (viteErr) {
+      console.warn('Vite dev server failed to start, falling back to static files:', viteErr);
+      if (foundIndexHtml) {
+        app.use(express.static(distDir));
+        app.get('*', (req, res) => {
+          res.sendFile(foundIndexHtml);
+        });
+      }
+    }
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    app.use(express.static(distDir));
     app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+      const indexHtml = path.join(distDir, 'index.html');
+      if (fs.existsSync(indexHtml)) {
+        res.sendFile(indexHtml);
+      } else {
+        res.status(500).send('Production build not found. Please run "npm run build".');
+      }
     });
   }
 
@@ -1279,4 +1305,10 @@ async function startServer() {
   });
 }
 
-startServer();
+// Only start standalone HTTP server when not running in a serverless environment (e.g. Vercel)
+if (!process.env.VERCEL) {
+  startServer();
+}
+
+export default app;
+export { app };
