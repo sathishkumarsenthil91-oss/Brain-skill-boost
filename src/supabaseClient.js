@@ -1,13 +1,10 @@
 import { createClient } from '@supabase/supabase-js';
 
-const SUPABASE_URL =
-  import.meta.env.VITE_SUPABASE_URL ||
-  'https://nzgisrrrbabedlntmcoc.supabase.co';
-
-const SUPABASE_PUBLIC_KEY =
-  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
-  import.meta.env.VITE_SUPABASE_ANON_KEY ||
-  'sb_publishable_CZTBEfxJPsy4EjJSMXtydw_yZ0gzyJ0';
+// Keep the production app pinned to the verified Brain Boost Supabase project.
+// This avoids stale Vercel environment variables silently pointing the frontend
+// at an older project where the Connectivity schema does not match.
+const SUPABASE_URL = 'https://nzgisrrrbabedlntmcoc.supabase.co';
+const SUPABASE_PUBLIC_KEY = 'sb_publishable_CZTBEfxJPsy4EjJSMXtydw_yZ0gzyJ0';
 
 export function reportServiceError(message) {
   if (typeof window !== 'undefined') {
@@ -22,12 +19,32 @@ async function resilientFetch(input, init) {
 
   try {
     const response = await fetch(input, init);
+
     if (mutation && !response.ok) {
-      reportServiceError('Your changes could not be saved. Check your connection and sign in again if needed.');
+      const tableMatch = url.match(/\/rest\/v1\/([^?]+)/);
+      const tableName = tableMatch?.[1] || 'database';
+      let details = '';
+
+      try {
+        details = await response.clone().text();
+      } catch {}
+
+      console.error('[Supabase mutation failed]', {
+        table: tableName,
+        method,
+        status: response.status,
+        details,
+      });
+
+      reportServiceError(
+        `Could not save ${tableName} data (HTTP ${response.status}). Please sign in again if the problem continues.`
+      );
     }
+
     return response;
   } catch (error) {
     if (mutation) {
+      console.error('[Supabase network error]', { method, url, error });
       reportServiceError('Your changes could not be saved because the database could not be reached.');
     }
     throw error;
