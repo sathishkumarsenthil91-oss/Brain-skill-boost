@@ -190,6 +190,16 @@ export interface LibraryAccessRequest {
   status: 'pending' | 'approved' | 'declined';
 }
 
+export interface NetworkVerification {
+  isVerified: boolean;
+  verifiedSkills: string[];
+  certificateCount: number;
+  certificatePostCount: number;
+  totalPostLikes: number;
+  likeThreshold: number;
+  learningEvidenceCount: number;
+}
+
 export interface NetworkUser {
   id: string;
   userId?: string;
@@ -202,6 +212,9 @@ export interface NetworkUser {
   role: string;
   location: string;
   bio: string;
+  portfolioUrl?: string;
+  isVerified?: boolean;
+  verification?: NetworkVerification;
   followersCount: number;
   followingCount: number;
   isFollowing: boolean;
