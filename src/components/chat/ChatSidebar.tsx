@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { UserProfile } from '../../types';
 import { ChatSessionMeta, ChatFolder } from './chatTypes';
-import { NEBULA_LOGO_URL } from '../../data/mockData';
+import { AnimatedNebulaLogo } from '../AnimatedNebulaLogo';
 
 interface ChatSidebarProps {
   isOpen: boolean;
@@ -173,13 +173,8 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
         {/* Top Header: App Brand & Close on mobile */}
         <div className="flex items-center justify-between px-3.5 pt-3.5 pb-2">
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-lg overflow-hidden bg-slate-900 border border-white/20 p-0.5">
-              <img
-                src={NEBULA_LOGO_URL}
-                alt="Nebula Logo"
-                className="w-full h-full object-cover rounded-md"
-                referrerPolicy="no-referrer"
-              />
+            <div className="w-6 h-6 rounded-lg overflow-hidden bg-slate-900 border border-white/20 p-0.5 flex items-center justify-center">
+              <AnimatedNebulaLogo size="100%" intensity="soft" />
             </div>
             <span className="font-bold text-xs sm:text-sm text-slate-800 dark:text-slate-100 tracking-tight">
               Nebula AI
