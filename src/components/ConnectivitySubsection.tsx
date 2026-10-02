@@ -1207,7 +1207,7 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
       {/* 2. CHAT TAB: Real User 1-on-1 Direct Messaging (Full Responsive Viewport) */}
       {/* ========================================================================= */}
       {activeTab === 'chat' && (
-        <div style={{ top: chatBounds.top, bottom: chatBounds.bottom }} className="fixed left-0 right-0 z-20 px-2 sm:px-4 md:px-6 flex flex-col min-h-0">
+        <div style={{ top: chatBounds.top, bottom: chatBounds.bottom }} className="fixed left-0 right-0 z-[45] px-2 sm:px-4 md:px-6 flex flex-col min-h-0">
           <div className="bg-white dark:bg-[#131b2e] rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm overflow-hidden h-full grid grid-cols-1 md:grid-cols-12 grid-rows-[minmax(0,1fr)] min-h-0">
             {/* Conversations Sidebar (Col 1-5) */}
             <div
