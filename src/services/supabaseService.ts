@@ -505,6 +505,17 @@ export const connectivityService = {
     return this.getLocalUsers(currentUser);
   },
 
+  async fetchCurrentFollowCounts(): Promise<{ followersCount: number; followingCount: number }> {
+    const uid = await requireConnectivityUser();
+    const [followers, following] = await Promise.all([
+      existingSupabaseClient.from('network_follows').select('*', { count: 'exact', head: true }).eq('following_id', uid),
+      existingSupabaseClient.from('network_follows').select('*', { count: 'exact', head: true }).eq('follower_id', uid),
+    ]);
+    if (followers.error) throw followers.error;
+    if (following.error) throw following.error;
+    return { followersCount: followers.count ?? 0, followingCount: following.count ?? 0 };
+  },
+
   // Get live list of followers for any user from the database
   async getFollowersList(userId: string, currentUser: UserProfile): Promise<NetworkUser[]> {
     if (!existingSupabaseClient) return [];

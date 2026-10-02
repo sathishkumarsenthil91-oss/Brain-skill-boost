@@ -32,6 +32,7 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
   const [activeTab, setActiveTab] = useState<ConnectivityTab>('home');
 
   // Real data state
+  const [followCounts, setFollowCounts] = useState<{ followersCount: number; followingCount: number } | null>(null);
   const [users, setUsers] = useState<NetworkUser[]>([]);
   const [posts, setPosts] = useState<NetworkPost[]>([]);
   const [conversations, setConversations] = useState<NetworkConversation[]>([]);
@@ -142,12 +143,14 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
 
     // 2. Fetch live data asynchronously from Supabase
     try {
-      const [liveUsers, livePosts, liveConversations, liveRequests] = await Promise.all([
+      const [liveUsers, livePosts, liveConversations, liveRequests, liveFollowCounts] = await Promise.all([
         connectivityService.fetchUsers(user),
         connectivityService.fetchPosts(user),
         connectivityService.fetchConversations(user),
         connectivityService.fetchAccessRequests(user),
+        connectivityService.fetchCurrentFollowCounts(),
       ]);
+      setFollowCounts(liveFollowCounts);
       setConversations(liveConversations);
       setAccessRequests(liveRequests);
       if (Array.isArray(liveUsers)) {
@@ -275,10 +278,10 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
   };
 
   // Current mapped user
-  const currentUserMapped = mapProfileToNetworkUser(user, userLibraries[user.email ? `usr-${user.email.replace(/[^a-zA-Z0-9]/g, '_')}` : 'current-user-real']);
+  const currentUserMapped = { ...mapProfileToNetworkUser(user, userLibraries[user.id || 'current-user-real']), ...(followCounts || {}) };
 
   // Active target for profile tab
-  const activeProfile = viewingUser || currentUserMapped;
+  const activeProfile = viewingUser ? users.find(peer => peer.id === viewingUser.id) || viewingUser : currentUserMapped;
   const isViewingSelf = activeProfile.id === currentUserMapped.id || activeProfile.id === 'current-user-real';
 
   // Handle Post Creation
@@ -361,6 +364,7 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
     try {
       const updated = await connectivityService.toggleFollow(targetUser.id, user);
       setUsers(updated);
+      setFollowCounts(await connectivityService.fetchCurrentFollowCounts());
       if (viewingUser && viewingUser.id === targetUser.id) {
         const refreshed = updated.find((u) => u.id === targetUser.id);
         if (refreshed) setViewingUser(refreshed);

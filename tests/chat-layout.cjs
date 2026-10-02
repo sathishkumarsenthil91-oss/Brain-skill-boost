@@ -14,7 +14,7 @@ const user={...initialUserProfile,id:'layout-owner',connectivitySetupCompleted:t
 const peers=Array.from({length:40},(_,i)=>({...mapProfileToNetworkUser(user),id:'peer-'+i,name:'Layout Peer '+i}));
 for(const method of ['getUsers','fetchUsers'])s[method]=()=>peers;
 for(const method of ['getPosts','fetchPosts','getConversations','fetchConversations','getAccessRequests','fetchAccessRequests'])s[method]=()=>[];
-s.getUserLibraries=()=>({});s.isSetupCompleted=()=>true;
+s.fetchCurrentFollowCounts=async()=>({followersCount:3,followingCount:9});s.getUserLibraries=()=>({});s.isSetupCompleted=()=>true;
 s.subscribeToRealtimeChat=s.subscribeToNetworkEvents=()=>()=>{};
 s.fetchMessagesForUser=async()=>[{id:'history-1',senderId:'peer-0',receiverId:user.id,content:'Saved history loaded',timestamp:'Now'}];
 createRoot(document.getElementById('root')).render(React.createElement(ConnectivitySubsection,{user,onNavigate:()=>{}}));
@@ -22,6 +22,9 @@ createRoot(document.getElementById('root')).render(React.createElement(Connectiv
 (async()=>{const b=await chromium.launch({channel:'chrome',headless:true});try{
 for(const viewport of [{width:1920,height:880},{width:390,height:844}]){
 const page=await b.newPage({viewport});page.on('pageerror',e=>console.error(e));await page.goto('http://localhost:3000/chat-layout-check.html');
+await page.getByRole('button',{name:'person My Profile',exact:true}).click();
+await page.getByRole('button',{name:'9 Following',exact:true}).waitFor();
+await page.getByRole('button',{name:'3 Followers',exact:true}).waitFor();
 await page.getByRole('button',{name:/Chat/}).first().click();
 await page.getByRole('heading',{name:'Layout Peer 0',exact:true}).click();
 await page.getByText('Saved history loaded',{exact:true}).last().waitFor();
