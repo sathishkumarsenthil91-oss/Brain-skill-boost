@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ViewType, UserProfile } from '../types';
-import { NEBULA_LOGO_URL } from '../data/mockData';
 import { BrainboostLogo } from './BrainboostLogo';
 import { AnimatedNebulaLogo } from './AnimatedNebulaLogo';
 
