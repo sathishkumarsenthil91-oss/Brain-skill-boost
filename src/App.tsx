@@ -589,7 +589,7 @@ export default function App() {
 
       {/* Floating Action Buttons */}
       {currentView !== 'nebula' && (
-        <div className="fixed bottom-20 md:bottom-8 right-5 z-40 flex flex-col gap-3">
+        <div className="fixed bottom-[calc(6.75rem+env(safe-area-inset-bottom))] md:bottom-8 right-4 sm:right-5 z-40 flex flex-col gap-3">
           {/* Floating Copilot Button */}
           <button
             onClick={() => setIsCopilotOpen(true)}
