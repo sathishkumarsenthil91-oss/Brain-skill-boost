@@ -1,5 +1,6 @@
 import React from 'react';
 import { ViewType } from '../types';
+import { AnimatedNebulaLogo } from './AnimatedNebulaLogo';
 
 interface BottomNavProps {
   currentView: ViewType;
@@ -35,9 +36,13 @@ export const BottomNav: React.FC<BottomNavProps> = ({ currentView, onNavigate })
                 : 'text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400'
             }`}
           >
-            <span className="material-symbols-outlined text-[20px]">
-              {btn.icon}
-            </span>
+            {btn.id === 'nebula' ? (
+              <AnimatedNebulaLogo size={22} intensity="soft" />
+            ) : (
+              <span className="material-symbols-outlined text-[20px]">
+                {btn.icon}
+              </span>
+            )}
             <span className="text-[10px] font-bold mt-0.5">{btn.label}</span>
           </button>
         );
