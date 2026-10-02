@@ -1,5 +1,6 @@
 import React from 'react';
 import { ViewType, UserProfile } from '../types';
+import { AnimatedNebulaLogo } from './AnimatedNebulaLogo';
 
 interface LandingHeroProps {
   onNavigate: (view: ViewType) => void;
@@ -225,8 +226,8 @@ export const LandingHero: React.FC<LandingHeroProps> = ({ onNavigate, user }) =>
             className="neu-raised rounded-2xl p-6 flex flex-col justify-between hover:scale-[1.02] transition-all cursor-pointer border border-transparent hover:border-blue-200 dark:hover:border-blue-800"
           >
             <div>
-              <div className="w-12 h-12 rounded-xl bg-indigo-100 dark:bg-indigo-950/80 flex items-center justify-center text-[#004ac6] dark:text-[#60a5fa] mb-4 shadow-inner">
-                <span className="material-symbols-outlined text-[26px]">psychology</span>
+              <div className="w-12 h-12 rounded-xl bg-slate-950 flex items-center justify-center mb-4 shadow-inner border border-indigo-300/30">
+                <AnimatedNebulaLogo size={42} />
               </div>
               <h3 className="text-[18px] font-bold text-[#121b2e] dark:text-white mb-2">
                 Nebula High-Thinking AI
