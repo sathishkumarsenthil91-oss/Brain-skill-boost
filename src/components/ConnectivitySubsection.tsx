@@ -30,6 +30,45 @@ const PROGRAMMING_LANGUAGES = [
   'Solidity', 'Bash / Shell'
 ];
 
+const CODE_SNIPPET_LANGUAGES = [
+  { value: 'typescript', label: 'TypeScript / JavaScript' },
+  { value: 'python', label: 'Python' },
+  { value: 'java', label: 'Java' },
+  { value: 'c', label: 'C' },
+  { value: 'cpp', label: 'C++' },
+  { value: 'csharp', label: 'C#' },
+  { value: 'go', label: 'Go (Golang)' },
+  { value: 'rust', label: 'Rust' },
+  { value: 'sql', label: 'SQL / Postgres' },
+  { value: 'html', label: 'HTML' },
+  { value: 'css', label: 'CSS' },
+  { value: 'php', label: 'PHP' },
+  { value: 'ruby', label: 'Ruby' },
+  { value: 'kotlin', label: 'Kotlin' },
+  { value: 'swift', label: 'Swift' },
+  { value: 'dart', label: 'Dart / Flutter' },
+  { value: 'shell', label: 'Shell / Bash' },
+  { value: 'powershell', label: 'PowerShell' },
+  { value: 'r', label: 'R' },
+  { value: 'matlab', label: 'MATLAB' },
+  { value: 'scala', label: 'Scala' },
+  { value: 'perl', label: 'Perl' },
+  { value: 'lua', label: 'Lua' },
+  { value: 'haskell', label: 'Haskell' },
+  { value: 'elixir', label: 'Elixir' },
+  { value: 'erlang', label: 'Erlang' },
+  { value: 'julia', label: 'Julia' },
+  { value: 'groovy', label: 'Groovy' },
+  { value: 'objective-c', label: 'Objective-C' },
+  { value: 'vbnet', label: 'VB.NET' },
+  { value: 'fsharp', label: 'F#' },
+  { value: 'solidity', label: 'Solidity' },
+  { value: 'json', label: 'JSON' },
+  { value: 'yaml', label: 'YAML' },
+  { value: 'xml', label: 'XML' },
+  { value: 'markdown', label: 'Markdown' },
+];
+
 export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
   user,
   onNavigate,
@@ -2449,13 +2488,13 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
                     <select
                       value={newPostCodeLang}
                       onChange={(e) => setNewPostCodeLang(e.target.value)}
-                      className="bg-slate-100 dark:bg-slate-800 text-xs text-slate-900 dark:text-white rounded-lg px-2 py-1 outline-none border border-slate-200 dark:border-slate-700"
+                      className="w-full sm:w-auto min-w-[220px] bg-slate-100 dark:bg-slate-800 text-xs text-slate-900 dark:text-white rounded-lg px-3 py-2 outline-none border border-slate-200 dark:border-slate-700 focus:border-purple-500 cursor-pointer"
                     >
-                      <option value="typescript">TypeScript / JavaScript</option>
-                      <option value="python">Python</option>
-                      <option value="go">Go (Golang)</option>
-                      <option value="sql">SQL / Postgres</option>
-                      <option value="rust">Rust</option>
+                      {CODE_SNIPPET_LANGUAGES.map((language) => (
+                        <option key={language.value} value={language.value}>
+                          {language.label}
+                        </option>
+                      ))}
                     </select>
                     <textarea
                       value={newPostCode}
