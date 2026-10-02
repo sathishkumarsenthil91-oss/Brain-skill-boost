@@ -191,12 +191,14 @@ export const ConnectivityDirectory: React.FC<ConnectivityDirectoryProps> = ({
                           <h4 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white group-hover:text-purple-600 transition-colors truncate">
                             {member.name}
                           </h4>
-                          <span
-                            className="material-symbols-outlined text-[15px] text-blue-500 shrink-0"
-                            title="Verified Member"
-                          >
-                            verified
-                          </span>
+                          {member.isVerified && (
+                            <span
+                              className="material-symbols-outlined text-[15px] text-blue-500 shrink-0"
+                              title="Verified Member"
+                            >
+                              verified
+                            </span>
+                          )}
                         </div>
                         <div className="flex items-center gap-1.5 text-[11px] text-purple-600 dark:text-purple-400 font-mono font-bold truncate">
                           <span>{member.userId || `@${member.username}`}</span>
