@@ -84,11 +84,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               onClick={() => onNavigate('nebula')}
               className="px-4 py-2.5 bg-white/15 hover:bg-white/25 text-white font-bold text-xs rounded-xl border border-white/30 backdrop-blur-xs transition-all flex items-center gap-2 cursor-pointer"
             >
-              {item.id === 'nebula' ? (
-                <AnimatedNebulaLogo size={20} intensity="soft" />
-              ) : (
-                <span className="material-symbols-outlined text-[18px]">{item.icon}</span>
-              )}
+              <AnimatedNebulaLogo size={20} intensity="soft" />
               AI Mentor Chat
             </button>
           </div>
@@ -149,7 +145,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 hover:bg-blue-50 dark:hover:bg-blue-950/60 border border-slate-200/60 dark:border-slate-700/60 hover:border-blue-300 dark:hover:border-blue-800 transition-all flex flex-col items-center text-center group cursor-pointer"
             >
               <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${item.color} text-white flex items-center justify-center text-xl shadow-xs group-hover:scale-110 transition-transform mb-2 relative`}>
-                <span className="material-symbols-outlined text-[20px]">{item.icon}</span>
+                {item.id === 'nebula' ? (
+                  <AnimatedNebulaLogo size={22} intensity="soft" />
+                ) : (
+                  <span className="material-symbols-outlined text-[20px]">{item.icon}</span>
+                )}
                 {item.badge && (
                   <span className="absolute -top-1.5 -right-1.5 px-1.5 py-0.2 bg-amber-400 text-slate-950 text-[9px] font-black rounded-full shadow-xs">
                     {item.badge}
