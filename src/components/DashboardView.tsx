@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ViewType, UserProfile, SkillItem } from '../types';
-import { initialWebinars, initialAssignments, initialAIRecommendations, NEBULA_LOGO_URL } from '../data/mockData';
+import { initialWebinars, initialAssignments, initialAIRecommendations } from '../data/mockData';
+import { AnimatedNebulaLogo } from './AnimatedNebulaLogo';
 
 interface DashboardViewProps {
   user: UserProfile;
@@ -83,7 +84,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               onClick={() => onNavigate('nebula')}
               className="px-4 py-2.5 bg-white/15 hover:bg-white/25 text-white font-bold text-xs rounded-xl border border-white/30 backdrop-blur-xs transition-all flex items-center gap-2 cursor-pointer"
             >
-              <span className="material-symbols-outlined text-[18px]">smart_toy</span>
+              {item.id === 'nebula' ? (
+                <AnimatedNebulaLogo size={20} intensity="soft" />
+              ) : (
+                <span className="material-symbols-outlined text-[18px]">{item.icon}</span>
+              )}
               AI Mentor Chat
             </button>
           </div>
@@ -302,13 +307,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           >
             <div className="flex items-center gap-3.5 relative z-10">
               <div className="relative w-14 h-14 rounded-full p-0.5 bg-gradient-to-tr from-blue-400 via-indigo-400 to-purple-400 shadow-md shadow-blue-500/30 shrink-0 group-hover:scale-105 transition-transform">
-                <div className="w-full h-full rounded-full overflow-hidden bg-slate-900 border-2 border-white/20">
-                  <img
-                    src={NEBULA_LOGO_URL}
-                    alt="Nebula AI Circular Logo"
-                    className="w-full h-full object-cover rounded-full"
-                    referrerPolicy="no-referrer"
-                  />
+                <div className="w-full h-full rounded-full overflow-hidden bg-slate-900 border-2 border-white/20 flex items-center justify-center">
+                  <AnimatedNebulaLogo size="92%" />
                 </div>
                 <span className="absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full bg-emerald-400 ring-2 ring-slate-950 animate-pulse" />
               </div>
