@@ -383,6 +383,7 @@ export interface IndustryTool {
   id: string;
   name: string;
   category: 'Frontend' | 'Backend' | 'DevOps & Cloud' | 'Testing & QA' | 'Design & Collab';
+  proficiency?: number;
   proficiencyRequired: 'Essential' | 'Recommended' | 'Bonus';
   icon: string;
   description: string;
@@ -398,6 +399,8 @@ export interface CertificationItem {
   title: string;
   issuer: string;
   badgeUrl?: string;
+  examScore?: string;
+  voucherCode?: string;
   difficulty: 'Foundational' | 'Associate' | 'Professional';
   marketValue: 'Very High' | 'High' | 'Medium';
   status: 'Earned' | 'In Progress' | 'Planned';

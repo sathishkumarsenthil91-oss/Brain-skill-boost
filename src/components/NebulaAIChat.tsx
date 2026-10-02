@@ -388,15 +388,8 @@ export const NebulaAIChat: React.FC<NebulaAIChatProps> = ({ user, onNavigate }) 
     setIsLoading(true);
     setInputMessage('');
 
-    // Ensure we have a valid UUID for the session
-    const currentSessionId =
-      sessionId && isValidUuid(sessionId)
-        ? sessionId
-        : (typeof crypto !== 'undefined' && crypto.randomUUID
-            ? crypto.randomUUID()
-            : '10000000-1000-4000-8000-100000000000');
-
-    setSessionId(currentSessionId);
+    // The backend owns session creation and message persistence.
+    let currentSessionId = sessionId && isValidUuid(sessionId) ? sessionId : null;
 
     // Optimistically show user message immediately
     const tempUserMsgId = `temp-${Date.now()}`;
@@ -415,45 +408,7 @@ export const NebulaAIChat: React.FC<NebulaAIChatProps> = ({ user, onNavigate }) 
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
-    // Check if user is authenticated with a valid UUID in Supabase
-    let authUserId: string | null = null;
-    try {
-      const { data: authData } = await supabase.auth.getSession();
-      if (authData?.session?.user?.id && isValidUuid(authData.session.user.id)) {
-        authUserId = authData.session.user.id;
-      }
-    } catch {}
-
     const sessionTitle = text.length > 55 ? text.slice(0, 52) + '...' : text;
-
-    // Persist user message to Supabase asynchronously if logged in
-    if (authUserId) {
-      (async () => {
-        try {
-          await supabase.from('ai_chat_sessions').upsert(
-            {
-              id: currentSessionId,
-              user_id: authUserId,
-              title: sessionTitle,
-              mode: activeMode,
-              updated_at: new Date().toISOString(),
-            },
-            { onConflict: 'id' }
-          );
-
-          await supabase.from('ai_chat_messages').insert({
-            session_id: currentSessionId,
-            user_id: authUserId,
-            role: 'user',
-            content: text,
-            model_used: 'user',
-            language: selectedLanguage,
-          });
-        } catch (dbErr) {
-          console.warn('Supabase user message save error:', dbErr);
-        }
-      })();
-    }
 
     try {
       const response = await apiFetch('/api/ai/chat', {
@@ -476,8 +431,11 @@ export const NebulaAIChat: React.FC<NebulaAIChatProps> = ({ user, onNavigate }) 
       });
 
       const data = await response.json();
-      const replyContent =
-        data.reply || data.content || 'I have analyzed your query and prepared guidance.';
+      if (!response.ok || data.error) throw new Error(data.error || 'AI request failed.');
+      const replyContent = data.reply || data.content;
+      if (!replyContent) throw new Error('AI returned an empty response. Please retry.');
+      currentSessionId = data.sessionId;
+      setSessionId(currentSessionId);
       const modelUsed = data.modelUsed || data.model || 'Nebula AI';
 
       const assistantMsg: ChatMessage = {
@@ -531,31 +489,10 @@ export const NebulaAIChat: React.FC<NebulaAIChatProps> = ({ user, onNavigate }) 
         console.warn('Local session storage save error:', storageErr);
       }
 
-      // Persist assistant message to Supabase asynchronously if logged in
-      if (authUserId) {
-        (async () => {
-          try {
-            await supabase.from('ai_chat_messages').insert({
-              session_id: currentSessionId,
-              user_id: authUserId,
-              role: 'assistant',
-              content: replyContent,
-              model_used: modelUsed,
-              language: selectedLanguage,
-            });
-            await supabase
-              .from('ai_chat_sessions')
-              .update({ updated_at: new Date().toISOString() })
-              .eq('id', currentSessionId);
-          } catch (dbErr) {
-            console.warn('Supabase assistant message save error:', dbErr);
-          }
-        })();
-      }
-
       // Refresh sidebar list
       fetchSessions(false);
     } catch (error: any) {
+      setMessages(messages);
       setInputMessage(text);
       setChatError(
         controller.signal.aborted

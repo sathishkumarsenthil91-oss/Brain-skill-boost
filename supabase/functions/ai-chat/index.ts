@@ -2,7 +2,7 @@ import { createClient } from "npm:@supabase/supabase-js@2.116.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version, x-retry-count, traceparent",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Content-Type": "application/json",
 };
@@ -94,31 +94,10 @@ Deno.serve(async (req: Request) => {
       if (!ownedSession) return json({ error: "Chat session was not found" }, 404);
     }
 
-    if (!sessionId) {
-      const title = message.length > 72 ? message.slice(0, 69) + "..." : message;
-      const { data: session, error } = await db
-        .from("ai_chat_sessions")
-        .insert({ user_id: user.id, title, mode })
-        .select("id")
-        .single();
-      if (error) throw new Error("Could not create chat session: " + error.message);
-      sessionId = session.id;
-    }
-
-    const { error: userInsertError } = await db.from("ai_chat_messages").insert({
-      session_id: sessionId,
-      user_id: user.id,
-      role: "user",
-      content: message,
-      model_used: "user",
-      language,
-    });
-    if (userInsertError) throw new Error("Could not save user message: " + userInsertError.message);
-
     const system = [
       "You are Nebula AI, BrainBoost's accurate and practical career and technical mentor.",
       "Answer the latest user message directly; do not repeat a previous answer unless asked.",
-      "Use the supplied conversation history for continuity.",
+      "Use the supplied conversation history for continuity. Be concise unless the user asks for detail.",
       "Never invent personal facts. Keep code secure and production-ready.",
       language !== "English" && language !== "auto" ? "Respond in " + language + "." : "Respond in the user's language.",
       "Mode: " + mode + ".",
@@ -136,13 +115,14 @@ Deno.serve(async (req: Request) => {
     ];
 
     const configuredModel = String(Deno.env.get("OPENAI_MODEL") || "").trim();
-    const allowedModels = new Set(["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.6", "gpt-6-astra"]);
-    const model = allowedModels.has(configuredModel) ? configuredModel : "gpt-5.6-luna";
+    // Use API model IDs, not Codex desktop model aliases.
+    const desktopAlias = /^(gpt-[56].*-(luna|terra|sol|astra)|gpt-5\.6)$/;
+    const model = configuredModel && !desktopAlias.test(configuredModel) ? configuredModel : "gpt-4.1-mini";
 
     const requestOpenAI = async () => {
       const response = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
-        signal: AbortSignal.timeout(60000),
+        signal: AbortSignal.timeout(25000),
         headers: {
           Authorization: "Bearer " + openAiKey,
           "Content-Type": "application/json",
@@ -150,6 +130,7 @@ Deno.serve(async (req: Request) => {
         body: JSON.stringify({
           model,
           messages,
+          max_completion_tokens: 1600,
         }),
       });
 
@@ -168,7 +149,7 @@ Deno.serve(async (req: Request) => {
     const firstErrorCode = String(aiPayload?.error?.code || aiPayload?.error?.type || "");
     const shouldRetry =
       aiResponse.status >= 500 ||
-      (aiResponse.status === 429 && firstErrorCode !== "insufficient_quota");
+      (aiResponse.status === 429 && !["insufficient_quota", "credit_balance_exhausted", "billing_hard_limit_reached"].includes(firstErrorCode));
 
     if (!aiResponse.ok && shouldRetry) {
       await sleep(900);
@@ -192,7 +173,7 @@ Deno.serve(async (req: Request) => {
       if (providerStatus === 401) error = "OpenAI API key is invalid or has been revoked";
       else if (providerStatus === 403) error = "OpenAI API key or project does not have permission to use this model";
       else if (providerStatus === 404) error = "The configured OpenAI model is not available";
-      else if (providerStatus === 429 && providerCode === "insufficient_quota") error = "OpenAI API quota or billing limit has been reached";
+      else if (providerStatus === 429 && ["insufficient_quota", "credit_balance_exhausted", "billing_hard_limit_reached"].includes(providerCode)) error = "AI credits are exhausted. The site owner needs to replenish the API account balance.";
       else if (providerStatus === 429) error = "OpenAI API rate limit was reached. Please retry shortly";
       else if (providerStatus >= 500) error = "OpenAI is temporarily unavailable. Please retry shortly";
       else if (providerStatus === 400) error = "OpenAI rejected the AI request configuration";
@@ -214,15 +195,22 @@ Deno.serve(async (req: Request) => {
 
     const modelUsed = String(aiPayload?.model || model);
 
-    const { error: assistantInsertError } = await db.from("ai_chat_messages").insert({
-      session_id: sessionId,
-      user_id: user.id,
-      role: "assistant",
-      content,
-      model_used: modelUsed,
-      language,
-    });
-    if (assistantInsertError) throw new Error("Could not save assistant message: " + assistantInsertError.message);
+    if (!sessionId) {
+      const title = message.length > 72 ? message.slice(0, 69) + "..." : message;
+      const { data: session, error } = await db
+        .from("ai_chat_sessions")
+        .insert({ user_id: user.id, title, mode })
+        .select("id")
+        .single();
+      if (error) throw new Error("Could not create chat session: " + error.message);
+      sessionId = session.id;
+    }
+
+    const { error: messagesInsertError } = await db.from("ai_chat_messages").insert([
+      { session_id: sessionId, user_id: user.id, role: "user", content: message, model_used: "user", language },
+      { session_id: sessionId, user_id: user.id, role: "assistant", content, model_used: modelUsed, language },
+    ]);
+    if (messagesInsertError) throw new Error("Could not save chat messages: " + messagesInsertError.message);
 
     const { error: sessionUpdateError } = await db
       .from("ai_chat_sessions")

@@ -251,7 +251,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
     const matchesCategory = activeCategory === 'All' || c.category === activeCategory;
     const instructorName = typeof c.instructor === 'string' ? c.instructor : (c.instructor?.name || '');
     const instructorCompany = typeof c.instructor === 'object' ? (c.instructor?.company || '') : '';
-    const tags = c.tags || c.skillsTaught || [];
+    const tags = c.skillsTaught || [];
     
     const query = searchQuery.toLowerCase();
     const matchesSearch =
@@ -267,7 +267,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
     setCourses((prev) =>
       prev.map((c) => {
         if (c.id === courseId) {
-          const currentEnrolled = c.isEnrolled ?? c.enrolled;
+          const currentEnrolled = c.isEnrolled;
           nextStatus = !currentEnrolled;
           const updatedCourse = {
             ...c,
@@ -713,14 +713,14 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
           {/* Course Cards Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredCourses.map((course) => {
-              const isEnrolled = course.isEnrolled ?? course.enrolled;
+              const isEnrolled = course.isEnrolled;
               const instructorName = typeof course.instructor === 'string' ? course.instructor : (course.instructor?.name || 'Staff Instructor');
               const instructorRole = typeof course.instructor === 'object' ? (course.instructor?.role || 'Lead') : '';
               const instructorCompany = typeof course.instructor === 'object' ? (course.instructor?.company || 'Brainboost') : '';
               const instructorAvatar = typeof course.instructor === 'object' ? course.instructor?.avatar : '';
               const thumbnail = course.thumbnail || course.coverImage || 'https://images.unsplash.com/photo-1517694712202-14dd9538aa97?w=800&auto=format&fit=crop&q=80';
               const modulesCount = course.modules?.length || course.modulesCount || 4;
-              const skills = course.skillsTaught || course.tags || [];
+              const skills = course.skillsTaught || course.skillsTaught || [];
 
               return (
                 <div
@@ -749,7 +749,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
                       <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between text-white text-xs font-semibold">
                         <span className="flex items-center gap-1">
                           <span className="material-symbols-outlined text-[16px] text-amber-400">star</span>
-                          {course.rating} ({course.totalStudents ? course.totalStudents.toLocaleString() : '1,200'} learners)
+                          {course.rating} ({course.enrolledCount ? course.enrolledCount.toLocaleString() : '1,200'} learners)
                         </span>
                         <span className="flex items-center gap-1">
                           <span className="material-symbols-outlined text-[16px]">schedule</span>

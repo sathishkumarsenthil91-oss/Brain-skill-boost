@@ -78,7 +78,7 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
   const [selectedCertForPost, setSelectedCertForPost] = useState<GeneratedCertificate | null>(null);
 
   // Edit profile form state
-  const [editBio, setEditBio] = useState(user.headline || '');
+  const [editBio, setEditBio] = useState(user.bio || '');
   const [editHeadline, setEditHeadline] = useState(user.targetRole || '');
   const [isPrivateAccount, setIsPrivateAccount] = useState(Boolean(user.isPrivateAccount));
 
@@ -142,12 +142,14 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
 
     // 2. Fetch live data asynchronously from Supabase
     try {
-      const [liveUsers, livePosts, liveConversations] = await Promise.all([
+      const [liveUsers, livePosts, liveConversations, liveRequests] = await Promise.all([
         connectivityService.fetchUsers(user),
         connectivityService.fetchPosts(user),
         connectivityService.fetchConversations(user),
+        connectivityService.fetchAccessRequests(user),
       ]);
       setConversations(liveConversations);
+      setAccessRequests(liveRequests);
       if (Array.isArray(liveUsers)) {
         setUsers(liveUsers);
       }
@@ -181,7 +183,7 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
                     lastMessage: newMsg.content,
                     lastMessageTime: newMsg.timestamp,
                     unreadCount: (c.unreadCount || 0) + 1,
-                    messages: [...c.messages, newMsg],
+                    messages: c.messages.some(m => m.id === newMsg.id) ? c.messages : [...c.messages, newMsg],
                   }
                 : c
             );
@@ -206,7 +208,7 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
 
     // Subscribe to live network events (follow/unfollow, live count changes across site)
     const unsubscribeEvents = connectivityService.subscribeToNetworkEvents(user, (event) => {
-      if (event.type === 'follow_change') {
+      if (event.type === 'follow_change' || event.type === 'library_change') {
         reloadData();
       }
     });
@@ -217,6 +219,23 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
     };
   }, [user]);
 
+  useEffect(() => {
+    let disposed = false;
+    const refreshChat = async () => {
+      if (document.visibilityState !== 'visible') return;
+      try {
+        const live = await connectivityService.fetchConversations(user);
+        if (!disposed) setConversations(live);
+      } catch { /* Existing history stays visible while the connection recovers. */ }
+    };
+    window.addEventListener('online', refreshChat);
+    document.addEventListener('visibilitychange', refreshChat);
+    const interval = window.setInterval(refreshChat, 15000);
+    return () => { disposed = true; clearInterval(interval);
+      window.removeEventListener('online', refreshChat);
+      document.removeEventListener('visibilitychange', refreshChat); };
+  }, [user.id, user.email]);
+
   // Auto-scroll to bottom of chat when new message arrives or chat opened
   useEffect(() => {
     if (activeTab === 'chat' && activeChatUser) {
@@ -224,7 +243,7 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
     }
   }, [conversations, activeTab, activeChatUser]);
 
-  const handleCompleteProfileSetup = (data: {
+  const handleCompleteProfileSetup = async (data: {
     userId: string;
     name: string;
     avatarUrl: string;
@@ -233,7 +252,7 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
     headline?: string;
     bio?: string;
   }) => {
-    connectivityService.completeSetup(user, data);
+    await connectivityService.completeSetup(user, data);
     if (onUpdateUser) {
       onUpdateUser({
         userId: data.userId,
@@ -266,6 +285,7 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
     e.preventDefault();
     if (!newPostContent.trim()) return;
 
+    try {
     await connectivityService.createPost(user, {
       content: newPostContent.trim(),
       imageUrl: newPostImage.trim() || undefined,
@@ -282,23 +302,26 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
     setShowCreatePostModal(false);
     reloadData();
     showToast('✨ Post published to your professional network!');
+    } catch (error: any) { showToast(error.message || 'Could not publish your post. Please retry.'); }
   };
 
   // Handle Like
-  const handleLike = (postId: string) => {
-    const updated = connectivityService.toggleLike(postId, user);
-    setPosts(updated);
+  const handleLike = async (postId: string) => {
+    try { setPosts(await connectivityService.toggleLike(postId, user)); }
+    catch (error: any) { showToast(error.message || 'Could not save like.'); }
   };
 
   // Handle Add Comment
   const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
-  const handleCommentSubmit = (postId: string) => {
+  const handleCommentSubmit = async (postId: string) => {
     const text = commentInputs[postId]?.trim();
     if (!text) return;
-    const updated = connectivityService.addComment(postId, text, user);
+    try {
+    const updated = await connectivityService.addComment(postId, text, user);
     setPosts(updated);
     setCommentInputs((prev) => ({ ...prev, [postId]: '' }));
     showToast('Comment added!');
+    } catch (error: any) { showToast(error.message || 'Could not save comment.'); }
   };
 
   // Handle Follow Toggle
@@ -343,7 +366,8 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
       }
       showToast(nextState ? `Following ${targetUser.name}!` : `Unfollowed ${targetUser.name}`);
     } catch (err) {
-      console.warn('Failed to update follow in database:', err);
+      showToast((err as Error).message || 'Could not save follow.');
+      reloadData();
     }
   };
 
@@ -357,8 +381,9 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
   };
 
   // Handle Request Library Access
-  const handleRequestLibraryAccess = (targetUserId: string) => {
-    const result = connectivityService.requestLibraryAccess(targetUserId, user);
+  const handleRequestLibraryAccess = async (targetUserId: string) => {
+    try {
+    const result = await connectivityService.requestLibraryAccess(targetUserId, user);
     if (result.success) {
       reloadData();
       if (viewingUser && viewingUser.id === targetUserId) {
@@ -369,14 +394,17 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
       }
       showToast('🔒 Access request sent to the owner! You will receive access once approved.');
     }
+    } catch (error: any) { showToast(error.message || 'Could not send access request.'); }
   };
 
   // Handle Respond to Access Request
-  const handleRespondToRequest = (requestId: string, decision: 'approved' | 'declined') => {
-    const updated = connectivityService.respondToAccessRequest(requestId, decision);
+  const handleRespondToRequest = async (requestId: string, decision: 'approved' | 'declined') => {
+    try {
+    const updated = await connectivityService.respondToAccessRequest(requestId, decision, user);
     setAccessRequests(updated);
     reloadData();
     showToast(decision === 'approved' ? '✓ Access granted to learning library!' : 'Access request declined.');
+    } catch (error: any) { showToast(error.message || 'Could not update access request.'); }
   };
 
   // Handle Send Chat Message
@@ -442,12 +470,14 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
   };
 
   // Save profile privacy / settings
-  const handleSaveProfile = (e: React.FormEvent) => {
+  const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    connectivityService.toggleProfilePrivacy(isPrivateAccount, user);
+    try {
+    await connectivityService.syncUserProfileToSupabase({ ...user, headline: editHeadline, bio: editBio, isPrivateAccount });
     if (onUpdateUser) {
       onUpdateUser({
         headline: editHeadline,
+        bio: editBio,
         targetRole: editHeadline,
         isPrivateAccount,
       });
@@ -455,6 +485,7 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
     setShowEditProfileModal(false);
     reloadData();
     showToast('Profile updated successfully!');
+    } catch (error: any) { showToast(error.message || 'Could not save profile.'); }
   };
 
   // Filtered posts for feed
@@ -2334,7 +2365,7 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
       {/* 5. Certificate Full Preview Modal */}
       {selectedCertificatePreview && (
         <CertificateGenerationModal
-          type={selectedCertificatePreview.type}
+          type={selectedCertificatePreview.type === 'specialization' ? 'course' : selectedCertificatePreview.type}
           item={{
             id: selectedCertificatePreview.itemId || selectedCertificatePreview.serialId,
             title: selectedCertificatePreview.title,

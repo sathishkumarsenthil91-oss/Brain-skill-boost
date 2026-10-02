@@ -13,7 +13,7 @@ interface ConnectivityProfileSetupModalProps {
     interests: string[];
     headline?: string;
     bio?: string;
-  }) => void;
+  }) => Promise<void>;
   onClose?: () => void;
   isFirstTime?: boolean;
 }
@@ -67,6 +67,8 @@ export const ConnectivityProfileSetupModal: React.FC<ConnectivityProfileSetupMod
       : ['AI & Machine Learning', 'Cloud Architecture', 'Distributed Systems', 'Full-Stack Web']
   );
 
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const [newSkillInput, setNewSkillInput] = useState('');
   const [newInterestInput, setNewInterestInput] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -132,12 +134,15 @@ export const ConnectivityProfileSetupModal: React.FC<ConnectivityProfileSetupMod
     setNewInterestInput('');
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!userId.trim() || userId === '@' || isUserIdTaken) return;
     if (!name.trim()) return;
 
-    onComplete({
+    if (saving) return;
+    setSaving(true); setSaveError('');
+    try {
+    await onComplete({
       userId: userId.trim(),
       name: name.trim(),
       avatarUrl,
@@ -146,6 +151,8 @@ export const ConnectivityProfileSetupModal: React.FC<ConnectivityProfileSetupMod
       headline: headline.trim(),
       bio: bio.trim(),
     });
+    } catch (error: any) { setSaveError(error.message || 'Could not save your profile. Please retry.'); }
+    finally { setSaving(false); }
   };
 
   return (
@@ -179,6 +186,7 @@ export const ConnectivityProfileSetupModal: React.FC<ConnectivityProfileSetupMod
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">
+          {saveError && <p role="alert" className="text-sm text-red-600">{saveError}</p>}
           {/* 1. Unique User ID Handle */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
@@ -339,7 +347,7 @@ export const ConnectivityProfileSetupModal: React.FC<ConnectivityProfileSetupMod
               <button
                 type="button"
                 onClick={() => handleAddSkill(newSkillInput)}
-                disabled={!newSkillInput.trim()}
+                disabled={saving || !newSkillInput.trim()}
                 className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-800 dark:text-slate-200 font-bold text-xs cursor-pointer disabled:opacity-40"
               >
                 + Add
@@ -413,7 +421,7 @@ export const ConnectivityProfileSetupModal: React.FC<ConnectivityProfileSetupMod
               <button
                 type="button"
                 onClick={() => handleAddCustomInterest(newInterestInput)}
-                disabled={!newInterestInput.trim()}
+                disabled={saving || !newInterestInput.trim()}
                 className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-800 dark:text-slate-200 font-bold text-xs cursor-pointer disabled:opacity-40"
               >
                 + Add
@@ -448,7 +456,7 @@ export const ConnectivityProfileSetupModal: React.FC<ConnectivityProfileSetupMod
             )}
             <button
               type="submit"
-              disabled={isUserIdTaken || !userId.trim() || userId === '@'}
+              disabled={saving || isUserIdTaken || !userId.trim() || userId === '@'}
               className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-black text-xs shadow-lg shadow-purple-500/20 transition-all cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
             >
               <span className="material-symbols-outlined text-[16px]">check_circle</span>

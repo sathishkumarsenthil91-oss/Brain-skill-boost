@@ -539,13 +539,13 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               {user.achievements.map((ach, idx) => (
                 <div key={idx} className="bg-white dark:bg-[#151f38] border border-slate-200/80 dark:border-slate-800 rounded-3xl p-6 shadow-xs flex gap-4 items-start">
                   <div className="w-12 h-12 rounded-2xl bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center text-2xl shrink-0">
-                    {ach.badgeIcon || '🏆'}
+                    {ach.badge || '🏆'}
                   </div>
                   <div>
                     <h4 className="text-sm font-bold text-slate-900 dark:text-white">{ach.title}</h4>
                     <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{ach.description}</p>
                     <span className="inline-block mt-2 text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-full">
-                      {ach.dateEarned || 'Verified Badge'}
+                      {ach.date || 'Verified Badge'}
                     </span>
                   </div>
                 </div>

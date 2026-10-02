@@ -52,53 +52,23 @@ export const AssignmentsView: React.FC<AssignmentsViewProps> = ({ user, onNaviga
     return a.status === filterStatus;
   });
 
-  const handleSubmitAssignment = (e: React.FormEvent) => {
+  const handleSubmitAssignment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeSubmission) return;
-
+    if (!activeSubmission || isSubmitting) return;
     setIsSubmitting(true);
-    setTimeout(() => {
-      setIsSubmitting(false);
-      const evalFeedback = `Automated AI & Senior Mentor Code Review Completed:
-• Repository Verified: ${submissionUrl}
-• Architecture Score: 98/100 (Modular structure, clean component and route boundaries).
-• Code Robustness: 95/100 (Input validation and comprehensive error handling).
-• Performance: 96/100 (Optimized queries and zero layout shift).
-Summary: High-quality production implementation. Ready for technical portfolio showcase.`;
-
-      setAssignments((prev) =>
-        prev.map((a) => {
-          if (a.id === activeSubmission.id) {
-            return {
-              ...a,
-              status: 'Graded',
-              score: 96,
-              feedback: evalFeedback,
-            };
-          }
-          return a;
-        })
-      );
-
-      if (user) {
-        supabaseService.submitAssignment(
-          activeSubmission.id,
-          {
-            githubRepoUrl: submissionUrl,
-            notes: submissionNotes,
-            score: 96,
-            feedback: evalFeedback,
-          },
-          user
-        );
-      }
-
+    try {
+      if (!user) throw new Error('Please sign in before submitting.');
+      await supabaseService.submitAssignment(activeSubmission.id, { githubRepoUrl: submissionUrl, notes: submissionNotes }, user);
+      setAssignments(prev => prev.map(a => a.id === activeSubmission.id ? { ...a, status: 'Submitted', score: undefined, feedback: undefined } : a));
       setActiveSubmission(null);
       setSubmissionUrl('');
       setSubmissionNotes('');
-      setToastMsg('Assignment successfully evaluated! AI code audit & rubric grade generated (Score: 96/100).');
-      setTimeout(() => setToastMsg(null), 4000);
-    }, 1200);
+      setToastMsg('Assignment submitted. Your review is pending.');
+    } catch (error) {
+      setToastMsg(error instanceof Error ? error.message : 'Could not save your submission. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -117,7 +87,7 @@ Summary: High-quality production implementation. Ready for technical portfolio s
               Practical Assignments & Code Reviews
             </h1>
             <p className="text-slate-300 text-sm max-w-2xl leading-relaxed">
-              Submit production-grade full-stack repos, containerization configurations, and algorithms. Receive instant Gemini AI code analysis and senior engineer rubrics.
+              Submit production-grade full-stack repos, containerization configurations, and algorithms. Published assignments can be submitted for review. Sample assignments are available for practice.
             </p>
           </div>
 
