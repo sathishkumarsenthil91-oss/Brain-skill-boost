@@ -12,6 +12,7 @@ import {
 import { connectivityService, mapProfileToNetworkUser, isSupabaseConfigured } from '../services/supabaseService';
 import { CertificateGenerationModal } from './CertificateGenerationModal';
 import { ConnectivityProfileSetupModal } from './connectivity/ConnectivityProfileSetupModal';
+import { SuggestedPeers } from './connectivity/SuggestedPeers';
 import { ConnectivityDirectory } from './connectivity/ConnectivityDirectory';
 import { FollowersFollowingModal } from './connectivity/FollowersFollowingModal';
 
@@ -1077,7 +1078,7 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
         </div>
 
         {/* Right Desktop Sidebar (Visible on lg screens) */}
-        <aside className="hidden lg:block lg:col-span-1 space-y-5 sticky top-36">
+        <aside className="hidden lg:block lg:col-span-1 min-w-0 space-y-5 sticky top-36">
           {/* User Mini Profile Card */}
           <div className="bg-white dark:bg-[#131b2e] rounded-2xl p-5 border border-slate-200/80 dark:border-slate-800/80 shadow-xs">
             <div className="flex items-center gap-3">
@@ -1145,55 +1146,6 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
             </button>
           </div>
 
-          {/* Suggested Peers to Connect */}
-          <div className="bg-white dark:bg-[#131b2e] rounded-2xl p-5 border border-slate-200/80 dark:border-slate-800/80 shadow-xs space-y-3">
-            <div className="flex items-center justify-between">
-              <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
-                Suggested Peers
-              </h4>
-              <span className="text-[10px] text-purple-600 font-bold">Verified</span>
-            </div>
-
-            <div className="space-y-3">
-              {users.slice(0, 4).map((peer) => (
-                <div key={peer.id} className="flex items-center justify-between gap-2">
-                  <div
-                    onClick={() => {
-                      setViewingUser(peer);
-                      setActiveTab('profile');
-                    }}
-                    className="flex items-center gap-2.5 min-w-0 cursor-pointer group"
-                  >
-                    <img
-                      src={peer.avatarUrl}
-                      alt={peer.name}
-                      className="w-9 h-9 rounded-full object-cover border border-slate-200 dark:border-slate-700 shrink-0"
-                    />
-                    <div className="min-w-0">
-                      <p className="text-xs font-bold text-slate-900 dark:text-white group-hover:text-purple-600 transition-colors truncate">
-                        {peer.name}
-                      </p>
-                      <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
-                        {peer.company}
-                      </p>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => handleFollowToggle(peer)}
-                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer shrink-0 ${
-                      peer.isFollowing
-                        ? 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
-                        : 'bg-purple-600 text-white hover:bg-purple-500'
-                    }`}
-                  >
-                    {peer.isFollowing ? '✓' : '+ Follow'}
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-
           {/* Trending Tech Discussions */}
           <div className="bg-white dark:bg-[#131b2e] rounded-2xl p-5 border border-slate-200/80 dark:border-slate-800/80 shadow-xs space-y-2.5">
             <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
@@ -1212,6 +1164,7 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
           </div>
         </aside>
       </div>
+      <div className="mt-5"><SuggestedPeers users={users} onSelect={(peer) => { setViewingUser(peer); setActiveTab('profile'); }} onFollow={handleFollowToggle} /></div>
     </div>
   )}
 
