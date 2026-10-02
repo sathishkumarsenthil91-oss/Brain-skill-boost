@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { UserProfile } from '../../types';
-import { NEBULA_LOGO_URL } from '../../data/mockData';
+import { AnimatedNebulaLogo } from '../AnimatedNebulaLogo';
 
 interface ChatWelcomeScreenProps {
   user: UserProfile;
@@ -91,12 +91,7 @@ export const ChatWelcomeScreen: React.FC<ChatWelcomeScreenProps> = ({
       {/* ChatGPT-style Icon */}
       <div className="relative w-14 h-14 sm:w-16 sm:h-16 rounded-3xl p-1 bg-gradient-to-tr from-blue-600 via-indigo-600 to-purple-600 shadow-xl mb-4">
         <div className="w-full h-full rounded-[22px] overflow-hidden bg-slate-900 border border-white/20 flex items-center justify-center">
-          <img
-            src={NEBULA_LOGO_URL}
-            alt="Nebula AI Logo"
-            className="w-full h-full object-cover"
-            referrerPolicy="no-referrer"
-          />
+          <AnimatedNebulaLogo size="92%" />
         </div>
         <span className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-[#18181b] animate-pulse" />
       </div>
