@@ -607,6 +607,8 @@ export const connectivityService = {
             return true;
           });
 
+          const verificationByUser = await fetchVerificationEvidence(peers.map((row: any) => row.id));
+
           const finalUsers: NetworkUser[] = peers.map((row: any) => {
             const baseUser = mapRowToNetworkUser(row, myUid || currentMapped.id);
             const targetId = row.id;
