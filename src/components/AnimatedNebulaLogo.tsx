@@ -25,14 +25,13 @@ export const AnimatedNebulaLogo: React.FC<AnimatedNebulaLogoProps> = ({
     >
       <style>{`
         @keyframes nebulaEyesLive {
-          0%, 7%   { transform: translateX(0) scaleY(0.08); }
-          12%, 29% { transform: translateX(0) scaleY(1); }
-          36%, 44% { transform: translateX(5px) scaleY(1); }
-          49%, 55% { transform: translateX(0) scaleY(1); }
-          62%, 70% { transform: translateX(-5px) scaleY(1); }
-          75%, 81% { transform: translateX(0) scaleY(1); }
-          84%, 86% { transform: translateX(0) scaleY(0.08); }
-          90%, 100% { transform: translateX(0) scaleY(1); }
+          0%, 18%  { transform: translateX(0) scaleY(1); }
+          24%, 34% { transform: translateX(5px) scaleY(1); }
+          40%, 48% { transform: translateX(0) scaleY(1); }
+          55%, 65% { transform: translateX(-5px) scaleY(1); }
+          71%, 78% { transform: translateX(0) scaleY(1); }
+          82%, 84% { transform: translateX(0) scaleY(0.12); }
+          88%, 100% { transform: translateX(0) scaleY(1); }
         }
 
         @keyframes nebulaGlowLive {
