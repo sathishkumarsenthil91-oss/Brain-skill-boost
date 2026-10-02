@@ -70,6 +70,137 @@ const BASE_STORAGE_KEYS = {
   SETUP_DONE: 'industryskill_connectivity_setup_done_v4',
 };
 
+const PROFILE_VERIFICATION_LIKE_THRESHOLD = 10;
+
+const emptyNetworkVerification = (): NonNullable<NetworkUser['verification']> => ({
+  isVerified: false,
+  verifiedSkills: [],
+  certificateCount: 0,
+  certificatePostCount: 0,
+  totalPostLikes: 0,
+  likeThreshold: PROFILE_VERIFICATION_LIKE_THRESHOLD,
+  learningEvidenceCount: 0,
+});
+
+const mapGeneratedCertificateRow = (row: any): GeneratedCertificate => {
+  const allowedTypes = ['course', 'webinar', 'youtube_track', 'specialization'];
+  return {
+    id: row.id,
+    serialId: row.serial_id || row.id,
+    type: (allowedTypes.includes(row.type) ? row.type : 'course') as GeneratedCertificate['type'],
+    itemId: row.item_id || '',
+    title: row.title || 'Verified Learning Certificate',
+    recipientName: row.recipient_name || '',
+    recipientEmail: row.recipient_email || undefined,
+    instructorOrSpeaker: row.instructor_or_speaker || 'Brain Boost Learning',
+    instructorRole: row.instructor_role || undefined,
+    organization: row.organization || 'Brain Boost',
+    issueDate: row.issue_date ? new Date(row.issue_date).toLocaleDateString() : '',
+    durationFormatted: row.duration_formatted || '',
+    completionPercentage: Number(row.completion_percentage ?? 100),
+    watchTimeSeconds: Number(row.watch_time_seconds ?? 0),
+    requiredWatchTimeSeconds: Number(row.required_watch_time_seconds ?? 0),
+    watchTimeFormatted: row.watch_time_formatted || undefined,
+    skillsValidated: Array.isArray(row.skills_validated) ? row.skills_validated : [],
+    legalDisclaimer: row.legal_disclaimer || 'Verified completion and skill mastery credential.',
+    verificationUrl: row.verification_url || '',
+    verificationBadge: row.verification_badge || undefined,
+  };
+};
+
+async function fetchVerificationEvidence(userIds: string[]): Promise<Map<string, {
+  verification: NonNullable<NetworkUser['verification']>;
+  certificates: GeneratedCertificate[];
+}>> {
+  const result = new Map<string, {
+    verification: NonNullable<NetworkUser['verification']>;
+    certificates: GeneratedCertificate[];
+  }>();
+
+  const ids = [...new Set(userIds.filter(Boolean))];
+  ids.forEach((id) => result.set(id, { verification: emptyNetworkVerification(), certificates: [] }));
+  if (!existingSupabaseClient || ids.length === 0) return result;
+
+  try {
+    const [certResult, skillResult, postResult] = await Promise.all([
+      existingSupabaseClient
+        .from('generated_certificates')
+        .select('*')
+        .in('user_id', ids),
+      existingSupabaseClient
+        .from('user_skills')
+        .select('user_id, skill_name, verified')
+        .in('user_id', ids),
+      existingSupabaseClient
+        .from('network_posts')
+        .select('id, author_id, attached_certificate_id, likes_count')
+        .in('author_id', ids),
+    ]);
+
+    const certificateRows = Array.isArray(certResult.data) ? certResult.data : [];
+    const skillRows = Array.isArray(skillResult.data) ? skillResult.data : [];
+    const postRows = Array.isArray(postResult.data) ? postResult.data : [];
+    const postIds = postRows.map((post: any) => post.id).filter(Boolean);
+
+    let likeRows: any[] = [];
+    if (postIds.length > 0) {
+      const likeResult = await existingSupabaseClient
+        .from('network_post_likes')
+        .select('post_id')
+        .in('post_id', postIds);
+      likeRows = Array.isArray(likeResult.data) ? likeResult.data : [];
+    }
+
+    const likeCountByPost = new Map<string, number>();
+    likeRows.forEach((like: any) => {
+      likeCountByPost.set(like.post_id, (likeCountByPost.get(like.post_id) || 0) + 1);
+    });
+
+    ids.forEach((userId) => {
+      const completedCertificates = certificateRows
+        .filter((row: any) => row.user_id === userId && Number(row.completion_percentage ?? 100) >= 100)
+        .map(mapGeneratedCertificateRow);
+
+      const verifiedSkillNames = skillRows
+        .filter((row: any) => row.user_id === userId && row.verified === true)
+        .map((row: any) => String(row.skill_name || '').trim())
+        .filter(Boolean);
+
+      const certificateSkills = completedCertificates.flatMap((cert) => cert.skillsValidated || []);
+      const verifiedSkills = [...new Set([...verifiedSkillNames, ...certificateSkills])];
+
+      const userPosts = postRows.filter((post: any) => post.author_id === userId);
+      const certificatePostCount = userPosts.filter((post: any) => Boolean(post.attached_certificate_id)).length;
+      const totalPostLikes = userPosts.reduce(
+        (sum: number, post: any) => sum + (likeCountByPost.get(post.id) || Number(post.likes_count || 0)),
+        0
+      );
+      const learningEvidenceCount = verifiedSkills.length + completedCertificates.length;
+      const isVerified =
+        completedCertificates.length > 0 &&
+        certificatePostCount > 0 &&
+        totalPostLikes >= PROFILE_VERIFICATION_LIKE_THRESHOLD;
+
+      result.set(userId, {
+        certificates: completedCertificates,
+        verification: {
+          isVerified,
+          verifiedSkills,
+          certificateCount: completedCertificates.length,
+          certificatePostCount,
+          totalPostLikes,
+          likeThreshold: PROFILE_VERIFICATION_LIKE_THRESHOLD,
+          learningEvidenceCount,
+        },
+      });
+    });
+  } catch (error) {
+    console.warn('Verification evidence lookup notice:', error);
+  }
+
+  return result;
+}
+
 // Map a raw Supabase profile row into a clean NetworkUser object
 export function mapRowToNetworkUser(row: any, currentUserId?: string): NetworkUser {
   const rawHandle = row.username || (row.email ? row.email.split('@')[0] : 'developer');
@@ -86,10 +217,6 @@ export function mapRowToNetworkUser(row: any, currentUserId?: string): NetworkUs
       skillsArray = row.skills.split(',').map((s: string) => s.trim()).filter(Boolean);
     }
   }
-  if (!skillsArray.length) {
-    skillsArray = ['Software Engineering', 'TypeScript', 'React'];
-  }
-
   let interestsArray: string[] = [];
   if (Array.isArray(row.interests)) {
     interestsArray = row.interests;
@@ -105,7 +232,7 @@ export function mapRowToNetworkUser(row: any, currentUserId?: string): NetworkUs
     id: row.id || (row.email ? `usr-${row.email.replace(/[^a-zA-Z0-9]/g, '_')}` : 'unknown-user'),
     userId: handleWithAt,
     username: cleanUsername,
-    name: row.name || (row.email ? row.email.split('@')[0] : 'Verified Member'),
+    name: row.name || (row.email ? row.email.split('@')[0] : 'Member'),
     headline:
       row.headline ||
       `${row.target_role || row.targetRole || 'Full Stack Engineer'} • ${row.college || 'Tech Institute'}`,
@@ -119,7 +246,10 @@ export function mapRowToNetworkUser(row: any, currentUserId?: string): NetworkUs
     company: row.college || row.company || 'Brainboost Academy',
     role: row.target_role || row.targetRole || 'Developer',
     location: row.location || 'Remote',
-    bio: row.bio || 'Passionate developer building verified projects and connecting with peers in real-time.',
+    bio: row.bio || 'Developer learning, building projects, and connecting with peers.',
+    portfolioUrl: row.portfolio_url || row.portfolioUrl || undefined,
+    isVerified: false,
+    verification: emptyNetworkVerification(),
     followersCount: Number(row.followers_count ?? row.followersCount ?? 0),
     followingCount: Number(row.following_count ?? row.followingCount ?? 0),
     isFollowing: false,
@@ -129,13 +259,13 @@ export function mapRowToNetworkUser(row: any, currentUserId?: string): NetworkUs
     isLibraryPrivate: Boolean(row.is_private_account ?? row.isPrivate),
     hasAccessToLibrary: !Boolean(row.is_private_account ?? row.isPrivate),
     skills: skillsArray,
-    interests: interestsArray.length ? interestsArray : ['Web Development', 'Cloud Architecture'],
+    interests: interestsArray,
     certificates: [],
     libraryItems: [],
     projects: [],
     internships: [],
     achievements: [],
-    onlineStatus: 'online',
+    onlineStatus: row.portfolio_url || row.portfolioUrl ? 'online' : 'offline',
   };
 }
 
@@ -164,7 +294,10 @@ export function mapProfileToNetworkUser(user: UserProfile, libraryItems?: UserLi
     location: user.location || 'Remote',
     bio:
       user.bio ||
-      `Passionate student developer targeting ${user.targetRole || 'Full Stack Engineering'}. Actively building verified projects.`,
+      `Student developer targeting ${user.targetRole || 'Full Stack Engineering'} and building real projects.`,
+    portfolioUrl: user.portfolioUrl || undefined,
+    isVerified: false,
+    verification: emptyNetworkVerification(),
     followersCount: user.followersCount ?? 0,
     followingCount: user.followingCount ?? 0,
     isFollowing: false,
@@ -172,20 +305,14 @@ export function mapProfileToNetworkUser(user: UserProfile, libraryItems?: UserLi
     isFriend: false,
     isPrivate: Boolean(user.isPrivateAccount),
     isLibraryPrivate: Boolean(user.isPrivateAccount),
-    skills:
-      user.skills && user.skills.length > 0
-        ? user.skills
-        : ['React', 'TypeScript', 'Node.js', 'PostgreSQL', 'Tailwind CSS'],
-    interests:
-      user.interests && user.interests.length > 0
-        ? user.interests
-        : ['Full-Stack Web', 'AI & Machine Learning', 'Cloud Architecture'],
+    skills: user.skills && user.skills.length > 0 ? user.skills : [],
+    interests: user.interests && user.interests.length > 0 ? user.interests : [],
     certificates: user.earnedCertificates || [],
     libraryItems: libraryItems || [],
     projects: user.projects || [],
     internships: user.internships || [],
     achievements: user.achievements || [],
-    onlineStatus: 'online',
+    onlineStatus: user.portfolioUrl ? 'online' : 'offline',
   };
 }
 
@@ -374,6 +501,8 @@ export const connectivityService = {
           .limit(30);
 
         if (!error && Array.isArray(data)) {
+          const verificationByUser = await fetchVerificationEvidence(data.map((row: any) => row.id));
+
           const peers = data.filter((row: any) => {
             if (myUid && row.id === myUid) return false;
             if (currentEmail && row.email?.toLowerCase().trim() === currentEmail) return false;
@@ -396,6 +525,8 @@ export const connectivityService = {
             }
           } catch {}
 
+          const verificationByUser = await fetchVerificationEvidence(peers.map((row: any) => row.id));
+
           return peers.map((row: any) => {
             const baseUser = mapRowToNetworkUser(row, myUid || 'current-user');
             const targetId = row.id;
@@ -406,6 +537,7 @@ export const connectivityService = {
             const liveFollowers = allFollows.filter((f) => f.following_id === targetId).length;
             const liveFollowing = allFollows.filter((f) => f.follower_id === targetId).length;
 
+            const evidence = verificationByUser.get(targetId);
             return {
               ...baseUser,
               followersCount: liveFollowers,
@@ -413,6 +545,9 @@ export const connectivityService = {
               isFollowing,
               isFollower,
               isFriend,
+              certificates: evidence?.certificates || [],
+              isVerified: evidence?.verification.isVerified || false,
+              verification: evidence?.verification || emptyNetworkVerification(),
             };
           });
         }
@@ -484,6 +619,7 @@ export const connectivityService = {
             const liveFollowersCount = allFollows.filter((f) => f.following_id === targetId).length;
             const liveFollowingCount = allFollows.filter((f) => f.follower_id === targetId).length;
 
+            const evidence = verificationByUser.get(targetId);
             return {
               ...baseUser,
               followersCount: liveFollowersCount,
@@ -491,6 +627,9 @@ export const connectivityService = {
               isFollowing,
               isFollower,
               isFriend,
+              certificates: evidence?.certificates || [],
+              isVerified: evidence?.verification.isVerified || false,
+              verification: evidence?.verification || emptyNetworkVerification(),
             };
           });
 
@@ -503,6 +642,34 @@ export const connectivityService = {
     }
 
     return this.getLocalUsers(currentUser);
+  },
+
+  async fetchCurrentNetworkProfile(currentUser: UserProfile): Promise<NetworkUser> {
+    const uid = await requireConnectivityUser();
+    const { data: row } = await existingSupabaseClient
+      .from('profiles')
+      .select('*')
+      .eq('id', uid)
+      .maybeSingle();
+
+    const baseUser = row
+      ? mapRowToNetworkUser(row, uid)
+      : mapProfileToNetworkUser({ ...currentUser, id: uid });
+
+    const evidence = (await fetchVerificationEvidence([uid])).get(uid);
+    const [followers, following] = await Promise.all([
+      existingSupabaseClient.from('network_follows').select('*', { count: 'exact', head: true }).eq('following_id', uid),
+      existingSupabaseClient.from('network_follows').select('*', { count: 'exact', head: true }).eq('follower_id', uid),
+    ]);
+
+    return {
+      ...baseUser,
+      followersCount: followers.count ?? baseUser.followersCount,
+      followingCount: following.count ?? baseUser.followingCount,
+      certificates: evidence?.certificates || baseUser.certificates || [],
+      isVerified: evidence?.verification.isVerified || false,
+      verification: evidence?.verification || emptyNetworkVerification(),
+    };
   },
 
   async fetchCurrentFollowCounts(): Promise<{ followersCount: number; followingCount: number }> {
@@ -689,7 +856,7 @@ export const connectivityService = {
             id: p.id,
             author: {
               id: p.author_id,
-              name: p.author?.name || 'Verified Developer',
+              name: p.author?.name || 'Member',
               avatarUrl:
                 p.author?.avatar_url ||
                 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80',
@@ -832,6 +999,21 @@ export const connectivityService = {
     const updated = [newPost, ...existingPosts];
     this.saveLocalPosts(updated, currentUser);
     return newPost;
+  },
+
+  async deletePost(postId: string, currentUser: UserProfile): Promise<NetworkPost[]> {
+    const uid = await requireConnectivityUser();
+    const { error } = await existingSupabaseClient
+      .from('network_posts')
+      .delete()
+      .eq('id', postId)
+      .eq('author_id', uid);
+
+    if (error) throw error;
+
+    const cached = this.getPosts(currentUser).filter((post) => post.id !== postId);
+    this.saveLocalPosts(cached, currentUser);
+    return this.fetchPosts(currentUser);
   },
 
   // Like & Comment handlers
