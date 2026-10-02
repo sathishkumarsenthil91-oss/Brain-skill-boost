@@ -10,34 +10,14 @@ const corsHeaders = {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: corsHeaders });
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-const extractChatText = (payload: any): string => {
-  const message = payload?.choices?.[0]?.message;
-  if (!message) return "";
-
-  if (typeof message.content === "string") {
-    const text = message.content.trim();
-    if (text) return text;
-  }
-
-  if (Array.isArray(message.content)) {
-    const parts = message.content
-      .map((part: any) => {
-        if (typeof part === "string") return part;
-        if (typeof part?.text === "string") return part.text;
-        return "";
-      })
-      .filter(Boolean);
-    const text = parts.join("").trim();
-    if (text) return text;
-  }
-
-  if (typeof message.refusal === "string" && message.refusal.trim()) {
-    return message.refusal.trim();
-  }
-
-  return "";
+const extractGeminiText = (payload: any): string => {
+  const parts = payload?.candidates?.[0]?.content?.parts;
+  if (!Array.isArray(parts)) return "";
+  return parts
+    .map((part: any) => (typeof part?.text === "string" ? part.text : ""))
+    .filter(Boolean)
+    .join("")
+    .trim();
 };
 
 Deno.serve(async (req: Request) => {
@@ -50,10 +30,10 @@ Deno.serve(async (req: Request) => {
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
-    const openAiKey = Deno.env.get("OPENAI_API_KEY");
+    const geminiKey = Deno.env.get("GEMINI_API_KEY");
 
     if (!supabaseUrl || !supabaseAnonKey) return json({ error: "Supabase runtime is not configured" }, 503);
-    if (!openAiKey) return json({ error: "AI service is not configured" }, 503);
+    if (!geminiKey) return json({ error: "Gemini API key is not configured. Add GEMINI_API_KEY to Supabase Edge Function secrets." }, 503);
 
     const db = createClient(supabaseUrl, supabaseAnonKey, {
       global: { headers: { Authorization: authHeader } },
@@ -103,97 +83,77 @@ Deno.serve(async (req: Request) => {
       "Mode: " + mode + ".",
     ].join(" ");
 
-    const messages = [
-      { role: "system", content: system },
+    const contents = [
       ...history
         .filter((item: any) => item && typeof item.content === "string")
         .map((item: any) => ({
-          role: item.role === "assistant" ? "assistant" : "user",
-          content: String(item.content),
+          role: item.role === "assistant" ? "model" : "user",
+          parts: [{ text: String(item.content) }],
         })),
-      { role: "user", content: message },
+      { role: "user", parts: [{ text: message }] },
     ];
 
-    const configuredModel = String(Deno.env.get("OPENAI_MODEL") || "").trim();
-    // Use API model IDs, not Codex desktop model aliases.
-    const desktopAlias = /^(gpt-[56].*-(luna|terra|sol|astra)|gpt-5\.6)$/;
-    const model = configuredModel && !desktopAlias.test(configuredModel) ? configuredModel : "gpt-4.1-mini";
+    const configuredModel = String(Deno.env.get("GEMINI_MODEL") || "").trim();
+    const model = configuredModel || "gemini-3.5-flash-lite";
+    const endpoint =
+      "https://generativelanguage.googleapis.com/v1beta/models/" +
+      encodeURIComponent(model) +
+      ":generateContent";
 
-    const requestOpenAI = async () => {
-      const response = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        signal: AbortSignal.timeout(25000),
-        headers: {
-          Authorization: "Bearer " + openAiKey,
-          "Content-Type": "application/json",
+    const aiResponse = await fetch(endpoint, {
+      method: "POST",
+      signal: AbortSignal.timeout(30000),
+      headers: {
+        "x-goog-api-key": geminiKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: system }] },
+        contents,
+        generationConfig: {
+          maxOutputTokens: 1600,
+          candidateCount: 1,
         },
-        body: JSON.stringify({
-          model,
-          messages,
-          max_completion_tokens: 1600,
-        }),
-      });
+      }),
+    });
 
-      let payload: any = null;
-      try {
-        payload = await response.json();
-      } catch {
-        payload = null;
-      }
-
-      return { response, payload };
-    };
-
-    let { response: aiResponse, payload: aiPayload } = await requestOpenAI();
-
-    const firstErrorCode = String(aiPayload?.error?.code || aiPayload?.error?.type || "");
-    const shouldRetry =
-      aiResponse.status >= 500 ||
-      (aiResponse.status === 429 && !["insufficient_quota", "credit_balance_exhausted", "billing_hard_limit_reached"].includes(firstErrorCode));
-
-    if (!aiResponse.ok && shouldRetry) {
-      await sleep(900);
-      const retried = await requestOpenAI();
-      aiResponse = retried.response;
-      aiPayload = retried.payload;
+    let aiPayload: any = null;
+    try {
+      aiPayload = await aiResponse.json();
+    } catch {
+      aiPayload = null;
     }
 
     if (!aiResponse.ok) {
       const providerStatus = aiResponse.status;
-      const providerCode = String(aiPayload?.error?.code || aiPayload?.error?.type || "unknown_error");
-      const providerRequestId = aiResponse.headers.get("x-request-id") || undefined;
+      const providerCode = String(aiPayload?.error?.status || aiPayload?.error?.code || "unknown_error");
+      const providerMessage = String(aiPayload?.error?.message || "");
 
-      console.error("OpenAI request failed", {
+      console.error("Gemini request failed", {
         providerStatus,
         providerCode,
-        providerRequestId,
+        providerMessage: providerMessage.slice(0, 300),
+        model,
       });
 
-      let error = "AI provider request failed";
-      if (providerStatus === 401) error = "OpenAI API key is invalid or has been revoked";
-      else if (providerStatus === 403) error = "OpenAI API key or project does not have permission to use this model";
-      else if (providerStatus === 404) error = "The configured OpenAI model is not available";
-      else if (providerStatus === 429 && ["insufficient_quota", "credit_balance_exhausted", "billing_hard_limit_reached"].includes(providerCode)) error = "AI credits are exhausted. The site owner needs to replenish the API account balance.";
-      else if (providerStatus === 429) error = "OpenAI API rate limit was reached. Please retry shortly";
-      else if (providerStatus >= 500) error = "OpenAI is temporarily unavailable. Please retry shortly";
-      else if (providerStatus === 400) error = "OpenAI rejected the AI request configuration";
+      let error = "Gemini request failed";
+      if (providerStatus === 400) error = "Gemini rejected the AI request configuration";
+      else if (providerStatus === 401) error = "Gemini API key authentication failed";
+      else if (providerStatus === 403) error = "Gemini API key does not have permission to use this model";
+      else if (providerStatus === 404) error = "The configured Gemini model is not available for this API key";
+      else if (providerStatus === 429) error = "Gemini quota or rate limit was reached. Please retry later";
+      else if (providerStatus >= 500) error = "Gemini is temporarily unavailable. Please retry shortly";
 
-      return json({ error, providerStatus, providerCode, providerRequestId }, 502);
+      return json({ error, providerStatus, providerCode }, 502);
     }
 
-    const content = extractChatText(aiPayload);
-
+    const content = extractGeminiText(aiPayload);
     if (!content) {
-      const finishReason = String(aiPayload?.choices?.[0]?.finish_reason || "unknown");
-      console.error("OpenAI chat completion returned no text", {
-        finishReason,
-        model: aiPayload?.model,
-        requestId: aiResponse.headers.get("x-request-id") || undefined,
-      });
-      return json({ error: "AI provider returned an empty response", finishReason }, 502);
+      const finishReason = String(aiPayload?.candidates?.[0]?.finishReason || "unknown");
+      const blockReason = String(aiPayload?.promptFeedback?.blockReason || "");
+      console.error("Gemini returned no text", { finishReason, blockReason, model });
+      return json({ error: "Gemini returned an empty response", finishReason, blockReason }, 502);
     }
-
-    const modelUsed = String(aiPayload?.model || model);
 
     if (!sessionId) {
       const title = message.length > 72 ? message.slice(0, 69) + "..." : message;
@@ -208,7 +168,7 @@ Deno.serve(async (req: Request) => {
 
     const { error: messagesInsertError } = await db.from("ai_chat_messages").insert([
       { session_id: sessionId, user_id: user.id, role: "user", content: message, model_used: "user", language },
-      { session_id: sessionId, user_id: user.id, role: "assistant", content, model_used: modelUsed, language },
+      { session_id: sessionId, user_id: user.id, role: "assistant", content, model_used: model, language },
     ]);
     if (messagesInsertError) throw new Error("Could not save chat messages: " + messagesInsertError.message);
 
@@ -218,7 +178,7 @@ Deno.serve(async (req: Request) => {
       .eq("id", sessionId);
     if (sessionUpdateError) throw new Error("Could not update chat session: " + sessionUpdateError.message);
 
-    return json({ content, response: content, sessionId, model: modelUsed });
+    return json({ content, response: content, sessionId, model, provider: "gemini" });
   } catch (error) {
     console.error("ai-chat failure", error instanceof Error ? error.message : "unknown");
     return json({ error: "Unable to process the chat request" }, 500);
