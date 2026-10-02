@@ -23,6 +23,13 @@ interface ConnectivitySubsectionProps {
 
 type ConnectivityTab = 'home' | 'chat' | 'profile';
 
+const PROGRAMMING_LANGUAGES = [
+  'JavaScript', 'TypeScript', 'Python', 'Java', 'C', 'C++', 'C#', 'Go', 'Rust', 'Kotlin',
+  'Swift', 'Dart', 'PHP', 'Ruby', 'SQL', 'R', 'MATLAB', 'Scala', 'Perl', 'Lua',
+  'Haskell', 'Elixir', 'Erlang', 'Julia', 'Groovy', 'Objective-C', 'VB.NET', 'F#',
+  'Solidity', 'Bash / Shell'
+];
+
 export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
   user,
   onNavigate,
@@ -34,6 +41,7 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
   // Real data state
   const [followCounts, setFollowCounts] = useState<{ followersCount: number; followingCount: number } | null>(null);
   const [users, setUsers] = useState<NetworkUser[]>([]);
+  const [currentNetworkProfile, setCurrentNetworkProfile] = useState<NetworkUser | null>(null);
   const [posts, setPosts] = useState<NetworkPost[]>([]);
   const [conversations, setConversations] = useState<NetworkConversation[]>([]);
   const [accessRequests, setAccessRequests] = useState<LibraryAccessRequest[]>([]);
@@ -41,7 +49,8 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
 
   // View state for profile (either current user or a selected connected user)
   const [viewingUser, setViewingUser] = useState<NetworkUser | null>(null);
-  const [profileTab, setProfileTab] = useState<'info' | 'certificates' | 'library'>('info');
+  const [profileTab, setProfileTab] = useState<'posts' | 'info' | 'certificates' | 'library'>('info');
+  const [selectedProfilePost, setSelectedProfilePost] = useState<NetworkPost | null>(null);
 
   // Active chat conversation
   const [activeChatUser, setActiveChatUser] = useState<NetworkUser | null>(null);
@@ -84,7 +93,7 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
   const [isPrivateAccount, setIsPrivateAccount] = useState(Boolean(user.isPrivateAccount));
 
   // Search and filter
-  const [feedFilter, setFeedFilter] = useState<'all' | 'following' | 'certs' | 'code'>('all');
+  const [feedFilter, setFeedFilter] = useState<'all' | 'followers' | 'following' | 'certs' | 'code'>('all');
   const [chatSearch, setChatSearch] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -143,13 +152,15 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
 
     // 2. Fetch live data asynchronously from Supabase
     try {
-      const [liveUsers, livePosts, liveConversations, liveRequests, liveFollowCounts] = await Promise.all([
+      const [liveUsers, liveCurrentProfile, livePosts, liveConversations, liveRequests, liveFollowCounts] = await Promise.all([
         connectivityService.fetchUsers(user),
+        connectivityService.fetchCurrentNetworkProfile(user),
         connectivityService.fetchPosts(user),
         connectivityService.fetchConversations(user),
         connectivityService.fetchAccessRequests(user),
         connectivityService.fetchCurrentFollowCounts(),
       ]);
+      setCurrentNetworkProfile(liveCurrentProfile);
       setFollowCounts(liveFollowCounts);
       setConversations(liveConversations);
       setAccessRequests(liveRequests);
@@ -278,7 +289,18 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
   };
 
   // Current mapped user
-  const currentUserMapped = { ...mapProfileToNetworkUser(user, userLibraries[user.id || 'current-user-real']), ...(followCounts || {}) };
+  const fallbackCurrentUser = mapProfileToNetworkUser(user, userLibraries[user.id || 'current-user-real']);
+  const currentProfileBase = currentNetworkProfile || fallbackCurrentUser;
+  const currentLibraryItems =
+    userLibraries[currentProfileBase.id] ||
+    userLibraries[user.id || 'current-user-real'] ||
+    currentProfileBase.libraryItems ||
+    [];
+  const currentUserMapped: NetworkUser = {
+    ...currentProfileBase,
+    libraryItems: currentLibraryItems,
+    ...(followCounts || {}),
+  };
 
   // Active target for profile tab
   const activeProfile = viewingUser ? users.find(peer => peer.id === viewingUser.id) || viewingUser : currentUserMapped;
@@ -313,6 +335,18 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
   const handleLike = async (postId: string) => {
     try { setPosts(await connectivityService.toggleLike(postId, user)); }
     catch (error: any) { showToast(error.message || 'Could not save like.'); }
+  };
+
+  const handleDeletePost = async (postId: string) => {
+    if (!window.confirm('Delete this post permanently?')) return;
+    try {
+      const refreshed = await connectivityService.deletePost(postId, user);
+      setPosts(refreshed);
+      if (selectedProfilePost?.id === postId) setSelectedProfilePost(null);
+      showToast('Post deleted.');
+    } catch (error: any) {
+      showToast(error.message || 'Could not delete this post.');
+    }
   };
 
   // Handle Add Comment
@@ -495,14 +529,25 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
 
   // Filtered posts for feed
   const filteredPosts = posts.filter((post) => {
+    const authorUser = users.find((u) => u.id === post.author.id);
+    if (feedFilter === 'followers') {
+      return post.author.isCurrentUser || Boolean(authorUser?.isFollower);
+    }
     if (feedFilter === 'following') {
-      const authorUser = users.find((u) => u.id === post.author.id);
-      return post.author.isCurrentUser || authorUser?.isFollowing;
+      return post.author.isCurrentUser || Boolean(authorUser?.isFollowing);
     }
     if (feedFilter === 'certs') return Boolean(post.attachedCertificate);
     if (feedFilter === 'code') return Boolean(post.codeSnippet);
     return true;
   });
+
+  const profilePosts = posts.filter(
+    (post) => post.author.id === activeProfile.id || (isViewingSelf && Boolean(post.author.isCurrentUser))
+  );
+  const activeVerification = activeProfile.verification;
+  const verifiedSkills = activeVerification?.verifiedSkills || [];
+  const normalizedVerifiedSkills = verifiedSkills.map((skill) => skill.toLowerCase());
+  const normalizedListedSkills = (activeProfile.skills || []).map((skill) => skill.toLowerCase());
 
   // Pending access requests count for current user
   const pendingRequestsForMe = accessRequests.filter(
@@ -632,6 +677,31 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 items-start">
             {/* Main Feed Column (Cols 1-2 on desktop, full width on mobile) */}
             <div className="lg:col-span-2 space-y-4 sm:space-y-6 min-w-0">
+          {/* Feed Filter Chips */}
+          <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-1.5 no-scrollbar -mx-3 px-3 sm:mx-0 sm:px-0">
+            {[
+              { id: 'all', label: 'All Posts', icon: 'dynamic_feed' },
+              { id: 'followers', label: 'Followers', icon: 'group' },
+              { id: 'following', label: 'Following', icon: 'person_check' },
+              { id: 'certs', label: 'Verifications', icon: 'military_tech' },
+              { id: 'code', label: 'Code', icon: 'code' },
+            ].map((f) => (
+              <button
+                key={f.id}
+                onClick={() => setFeedFilter(f.id as any)}
+                className={`px-3 sm:px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shrink-0 cursor-pointer whitespace-nowrap ${
+                  feedFilter === f.id
+                    ? 'bg-purple-600 text-white shadow-xs shadow-purple-500/20'
+                    : 'bg-white dark:bg-[#131b2e] text-slate-600 dark:text-slate-400 hover:text-purple-600 border border-slate-200/80 dark:border-slate-800'
+                }`}
+              >
+                <span className="material-symbols-outlined text-[15px]">{f.icon}</span>
+                {f.label}
+              </button>
+            ))}
+          </div>
+
+
           {/* Quick Post Prompt Bar */}
           <div
             onClick={() => setShowCreatePostModal(true)}
@@ -664,29 +734,6 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
             onOpenChat={openChatWithUser}
           />
 
-
-          {/* Feed Filter Chips */}
-          <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-1.5 no-scrollbar -mx-3 px-3 sm:mx-0 sm:px-0">
-            {[
-              { id: 'all', label: 'All Posts', icon: 'dynamic_feed' },
-              { id: 'following', label: 'Following', icon: 'person_check' },
-              { id: 'certs', label: 'Verified Certificates', icon: 'military_tech' },
-              { id: 'code', label: 'Code & Architecture', icon: 'code' },
-            ].map((f) => (
-              <button
-                key={f.id}
-                onClick={() => setFeedFilter(f.id as any)}
-                className={`px-3 sm:px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shrink-0 cursor-pointer whitespace-nowrap ${
-                  feedFilter === f.id
-                    ? 'bg-purple-600 text-white shadow-xs shadow-purple-500/20'
-                    : 'bg-white dark:bg-[#131b2e] text-slate-600 dark:text-slate-400 hover:text-purple-600 border border-slate-200/80 dark:border-slate-800'
-                }`}
-              >
-                <span className="material-symbols-outlined text-[15px]">{f.icon}</span>
-                {f.label}
-              </button>
-            ))}
-          </div>
 
           {/* Posts Feed */}
           <div className="space-y-4 sm:space-y-6">
@@ -723,9 +770,11 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
                           <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white group-hover:text-purple-500 transition-colors truncate">
                             {post.author.name}
                           </h4>
-                          <span className="material-symbols-outlined text-[15px] text-blue-500 shrink-0" title="Verified Member">
-                            verified
-                          </span>
+                          {(isCurrentUserPost ? currentUserMapped.isVerified : authorUser?.isVerified) && (
+                            <span className="material-symbols-outlined text-[15px] text-blue-500 shrink-0" title="Verified Member">
+                              verified
+                            </span>
+                          )}
                         </div>
                         <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-1 max-w-[140px] xs:max-w-[200px] sm:max-w-md truncate">
                           {post.author.headline} • {post.timestamp}
@@ -733,8 +782,16 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
                       </div>
                     </div>
 
-                    {/* Follow/Message action if other user */}
-                    {!isCurrentUserPost && authorUser && (
+                    {/* Post ownership / follow action */}
+                    {isCurrentUserPost ? (
+                      <button
+                        onClick={() => handleDeletePost(post.id)}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors cursor-pointer shrink-0"
+                        title="Delete post"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">delete</span>
+                      </button>
+                    ) : authorUser ? (
                       <button
                         onClick={() => handleFollowToggle(authorUser)}
                         className={`px-2.5 sm:px-3 py-1 rounded-xl text-[11px] sm:text-xs font-bold transition-all cursor-pointer shrink-0 whitespace-nowrap ${
@@ -745,7 +802,7 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
                       >
                         {authorUser.isFollowing ? 'Following' : '+ Follow'}
                       </button>
-                    )}
+                    ) : null}
                   </div>
 
                   {/* Post Content */}
@@ -1458,9 +1515,16 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
                   <h3 className="text-lg sm:text-2xl font-black text-slate-900 dark:text-white">
                     {activeProfile.name}
                   </h3>
-                  <span className="material-symbols-outlined text-blue-500 text-[18px] sm:text-[20px]" title="Verified Profile">
-                    verified
-                  </span>
+                  {activeProfile.isVerified && (
+                    <span className="material-symbols-outlined text-blue-500 text-[18px] sm:text-[20px]" title="Verified Profile">
+                      verified
+                    </span>
+                  )}
+                  {!activeProfile.isVerified && (
+                    <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[9px] font-black uppercase tracking-wide">
+                      Not verified
+                    </span>
+                  )}
                   
                   {/* Relationship Badges */}
                   {!isViewingSelf && (activeProfile.isFriend || (activeProfile.isFollowing && activeProfile.isFollower)) && (
@@ -1509,6 +1573,25 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
                   <span>{activeProfile.company}</span> • <span>{activeProfile.location}</span>
                 </p>
 
+                <div className="mt-1.5 flex items-center gap-2 text-[11px] font-bold">
+                  {activeProfile.portfolioUrl ? (
+                    <a
+                      href={activeProfile.portfolioUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 hover:underline"
+                    >
+                      <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                      Live website
+                    </a>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 text-slate-400">
+                      <span className="w-2 h-2 rounded-full bg-slate-400" />
+                      Offline
+                    </span>
+                  )}
+                </div>
+
                 <p className="text-xs sm:text-sm text-slate-700 dark:text-slate-300 mt-2.5 sm:mt-3 leading-relaxed break-words">
                   {activeProfile.bio}
                 </p>
@@ -1517,12 +1600,16 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
 
               {/* Stats Bar */}
               <div className="flex items-center justify-between sm:justify-start gap-4 sm:gap-6 mt-4 pt-3.5 sm:pt-4 border-t border-slate-100 dark:border-slate-800 text-xs overflow-x-auto">
-                <div>
+                <button
+                  type="button"
+                  onClick={() => setProfileTab('posts')}
+                  className="hover:text-purple-600 dark:hover:text-purple-400 transition-colors cursor-pointer text-left flex items-center"
+                >
                   <span className="font-extrabold text-slate-900 dark:text-white mr-1">
-                    {posts.filter((p) => p.author.id === activeProfile.id || (isViewingSelf && p.author.isCurrentUser)).length}
+                    {profilePosts.length}
                   </span>
-                  <span className="text-slate-500">Posts</span>
-                </div>
+                  <span className="text-slate-500 hover:underline">Posts</span>
+                </button>
                 <button
                   type="button"
                   onClick={() => openFollowList('followers', activeProfile)}
@@ -1556,9 +1643,10 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
           {/* Profile Navigation Tabs: Info & Skills | Certificates | Library */}
           <div className="flex items-center border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-[#131b2e] rounded-xl p-1 shadow-xs gap-1">
             {[
-              { id: 'info', label: 'Info & Skills', icon: 'psychology' },
+              { id: 'posts', label: `Posts (${profilePosts.length})`, icon: 'grid_view' },
+              { id: 'info', label: 'Skills', icon: 'psychology' },
               { id: 'certificates', label: `Certificates (${activeProfile.certificates?.length || 0})`, icon: 'military_tech' },
-              { id: 'library', label: 'Learning Library', icon: 'local_library', badge: activeProfile.isPrivate && !isViewingSelf ? 'Locked' : 'Active' },
+              { id: 'library', label: 'Enrollments', icon: 'local_library', badge: activeProfile.isPrivate && !isViewingSelf ? 'Locked' : `${activeProfile.libraryItems?.length || 0}` },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -1584,25 +1672,240 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
             ))}
           </div>
 
+          {/* Posts: Instagram-style public profile grid */}
+          {profileTab === 'posts' && (
+            <div className="space-y-4">
+              {profilePosts.length > 0 ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
+                  {profilePosts.map((post) => (
+                    <div
+                      key={post.id}
+                      className="relative group rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#131b2e] aspect-square"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setSelectedProfilePost(post)}
+                        className="w-full h-full text-left cursor-pointer"
+                      >
+                        {post.imageUrl ? (
+                          <img src={post.imageUrl} alt="Post" className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="w-full h-full p-3 sm:p-4 flex flex-col justify-between bg-gradient-to-br from-slate-50 to-purple-50 dark:from-slate-900 dark:to-purple-950/30">
+                            <p className="text-[11px] sm:text-xs text-slate-700 dark:text-slate-200 line-clamp-6 leading-relaxed">
+                              {post.content}
+                            </p>
+                            <div className="flex items-center gap-2 text-slate-400">
+                              {post.attachedCertificate && <span className="material-symbols-outlined text-[18px] text-amber-500">military_tech</span>}
+                              {post.codeSnippet && <span className="material-symbols-outlined text-[18px] text-purple-500">code</span>}
+                            </div>
+                          </div>
+                        )}
+                        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent p-2.5 pt-8 text-white flex items-center gap-3 text-[10px] font-bold">
+                          <span className="flex items-center gap-1">
+                            <span className="material-symbols-outlined text-[14px]">favorite</span>
+                            {post.likesCount}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <span className="material-symbols-outlined text-[14px]">chat_bubble</span>
+                            {post.commentsCount}
+                          </span>
+                        </div>
+                      </button>
+                      {isViewingSelf && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeletePost(post.id)}
+                          className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/65 hover:bg-rose-600 text-white flex items-center justify-center opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all cursor-pointer"
+                          title="Delete post"
+                        >
+                          <span className="material-symbols-outlined text-[17px]">delete</span>
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="bg-white dark:bg-[#131b2e] rounded-2xl p-10 text-center border border-slate-200/80 dark:border-slate-800/80">
+                  <span className="material-symbols-outlined text-4xl text-slate-400 mb-2">grid_off</span>
+                  <h4 className="text-sm font-bold text-slate-700 dark:text-slate-300">No posts yet</h4>
+                  <p className="text-xs text-slate-500 mt-1">
+                    {isViewingSelf ? 'Create your first post and it will appear here.' : 'This member has not posted yet.'}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Tab 1: Info & Skills */}
           {profileTab === 'info' && (
             <div className="space-y-6">
-              {/* Verified Skills */}
-              <div className="bg-white dark:bg-[#131b2e] rounded-2xl p-5 border border-slate-200/80 dark:border-slate-800/80 shadow-xs space-y-3">
-                <h4 className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-                  <span className="material-symbols-outlined text-[16px] text-purple-600">verified</span>
-                  Verified Technical Skills & Endorsements
-                </h4>
-                <div className="flex flex-wrap gap-2">
-                  {activeProfile.skills.map((skill, idx) => (
+              {/* Real verification progress */}
+              <div className="bg-white dark:bg-[#131b2e] rounded-2xl p-5 border border-slate-200/80 dark:border-slate-800/80 shadow-xs space-y-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h4 className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-[16px] text-blue-600">verified_user</span>
+                      Profile Verification Progress
+                    </h4>
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      Blue tick unlocks only after real learning evidence, a certificate post, and {activeVerification?.likeThreshold || 10}+ real likes.
+                    </p>
+                  </div>
+                  <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase ${
+                    activeProfile.isVerified
+                      ? 'bg-blue-100 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
+                  }`}>
+                    {activeProfile.isVerified ? 'Verified' : 'In progress'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {[
+                    {
+                      label: 'Learning / Certificate',
+                      done: (activeVerification?.certificateCount || 0) > 0,
+                      value: `${activeVerification?.certificateCount || 0} issued`,
+                    },
+                    {
+                      label: 'Certificate Post',
+                      done: (activeVerification?.certificatePostCount || 0) > 0,
+                      value: `${activeVerification?.certificatePostCount || 0} posted`,
+                    },
+                    {
+                      label: 'Community Likes',
+                      done: (activeVerification?.totalPostLikes || 0) >= (activeVerification?.likeThreshold || 10),
+                      value: `${activeVerification?.totalPostLikes || 0}/${activeVerification?.likeThreshold || 10}`,
+                    },
+                  ].map((item) => (
                     <div
-                      key={idx}
-                      className="px-3.5 py-1.5 rounded-xl bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800/60 text-purple-700 dark:text-purple-300 text-xs font-bold flex items-center gap-1.5 shadow-xs"
+                      key={item.label}
+                      className={`rounded-xl border p-3 ${
+                        item.done
+                          ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30'
+                          : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40'
+                      }`}
                     >
-                      <span>{skill}</span>
-                      <span className="text-[10px] text-purple-500 font-semibold">✓ Verified</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className={`material-symbols-outlined text-[16px] ${item.done ? 'text-emerald-600' : 'text-slate-400'}`}>
+                          {item.done ? 'check_circle' : 'radio_button_unchecked'}
+                        </span>
+                        <span className="text-[11px] font-bold text-slate-700 dark:text-slate-200">{item.label}</span>
+                      </div>
+                      <p className="text-[10px] text-slate-500 mt-1 ml-5.5">{item.value}</p>
                     </div>
                   ))}
+                </div>
+              </div>
+
+              {/* Only truly verified skills get a verification mark */}
+              <div className="bg-white dark:bg-[#131b2e] rounded-2xl p-5 border border-slate-200/80 dark:border-slate-800/80 shadow-xs space-y-3">
+                <h4 className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-[16px] text-purple-600">psychology</span>
+                  Technical Skills & Learning Status
+                </h4>
+                {verifiedSkills.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {verifiedSkills.map((skill, idx) => (
+                      <div
+                        key={`verified-${idx}`}
+                        className="px-3.5 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 text-emerald-700 dark:text-emerald-300 text-xs font-bold flex items-center gap-1.5"
+                      >
+                        <span>{skill}</span>
+                        <span className="text-[10px] font-semibold">✓ Verified</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500">
+                    No technical skill is verified yet. Complete learning and earn a real certificate first.
+                  </p>
+                )}
+
+                {(activeProfile.skills || []).filter(
+                  (skill) => !normalizedVerifiedSkills.some(
+                    (verified) => verified.includes(skill.toLowerCase()) || skill.toLowerCase().includes(verified)
+                  )
+                ).length > 0 && (
+                  <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                    <p className="text-[10px] font-black uppercase tracking-wide text-slate-400 mb-2">Listed / Learning</p>
+                    <div className="flex flex-wrap gap-2">
+                      {(activeProfile.skills || [])
+                        .filter(
+                          (skill) => !normalizedVerifiedSkills.some(
+                            (verified) => verified.includes(skill.toLowerCase()) || skill.toLowerCase().includes(verified)
+                          )
+                        )
+                        .map((skill, idx) => (
+                          <span
+                            key={`learning-${idx}`}
+                            className="px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-bold border border-slate-200 dark:border-slate-700"
+                          >
+                            {skill} • Learning
+                          </span>
+                        ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Programming-language learning catalogue */}
+              <div className="bg-white dark:bg-[#131b2e] rounded-2xl p-5 border border-slate-200/80 dark:border-slate-800/80 shadow-xs space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h4 className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-[16px] text-indigo-600">code</span>
+                      Programming Language Learning
+                    </h4>
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      Languages stay unverified until real learning evidence is completed.
+                    </p>
+                  </div>
+                  {isViewingSelf && (
+                    <button
+                      type="button"
+                      onClick={() => onNavigate('skills')}
+                      className="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-[10px] font-black uppercase tracking-wide cursor-pointer"
+                    >
+                      Learn Skills
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                  {PROGRAMMING_LANGUAGES.map((language) => {
+                    const normalized = language.toLowerCase();
+                    const isVerifiedLanguage = normalizedVerifiedSkills.some(
+                      (skill) => skill.includes(normalized) || normalized.includes(skill)
+                    );
+                    const isLearningLanguage = normalizedListedSkills.some(
+                      (skill) => skill.includes(normalized) || normalized.includes(skill)
+                    );
+
+                    return (
+                      <div
+                        key={language}
+                        className={`rounded-xl border px-3 py-2.5 ${
+                          isVerifiedLanguage
+                            ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800'
+                            : isLearningLanguage
+                              ? 'bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800'
+                              : 'bg-slate-50 dark:bg-slate-900/40 border-slate-200 dark:border-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-[11px] font-bold text-slate-800 dark:text-slate-200 truncate">{language}</span>
+                          <span className={`material-symbols-outlined text-[14px] ${
+                            isVerifiedLanguage ? 'text-emerald-600' : isLearningLanguage ? 'text-amber-500' : 'text-slate-400'
+                          }`}>
+                            {isVerifiedLanguage ? 'verified' : isLearningLanguage ? 'school' : 'radio_button_unchecked'}
+                          </span>
+                        </div>
+                        <p className="text-[9px] mt-1 font-semibold text-slate-500">
+                          {isVerifiedLanguage ? 'Verified' : isLearningLanguage ? 'Learning' : 'Not started'}
+                        </p>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -1944,6 +2247,71 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
       {/* ========================================================================= */}
 
       {/* 1. Create Post Modal */}
+            {/* Profile Post Preview */}
+      {selectedProfilePost && (
+        <div className="fixed inset-0 z-[80] bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5">
+          <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto bg-white dark:bg-[#131b2e] rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl">
+            <div className="p-4 flex items-center justify-between border-b border-slate-200 dark:border-slate-800">
+              <div>
+                <h4 className="text-sm font-black text-slate-900 dark:text-white">{selectedProfilePost.author.name}</h4>
+                <p className="text-[11px] text-slate-500">{selectedProfilePost.timestamp}</p>
+              </div>
+              <div className="flex items-center gap-1">
+                {isViewingSelf && selectedProfilePost.author.isCurrentUser && (
+                  <button
+                    type="button"
+                    onClick={() => handleDeletePost(selectedProfilePost.id)}
+                    className="p-2 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 cursor-pointer"
+                    title="Delete post"
+                  >
+                    <span className="material-symbols-outlined text-[19px]">delete</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setSelectedProfilePost(null)}
+                  className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-[20px]">close</span>
+                </button>
+              </div>
+            </div>
+
+            {selectedProfilePost.imageUrl && (
+              <img src={selectedProfilePost.imageUrl} alt="Post" className="w-full max-h-[55vh] object-contain bg-black" />
+            )}
+
+            <div className="p-4 sm:p-5 space-y-4">
+              <p className="text-sm text-slate-800 dark:text-slate-200 whitespace-pre-line leading-relaxed">
+                {selectedProfilePost.content}
+              </p>
+
+              {selectedProfilePost.codeSnippet && (
+                <pre className="bg-slate-950 text-emerald-400 rounded-xl p-4 text-xs overflow-x-auto">
+                  {selectedProfilePost.codeSnippet.code}
+                </pre>
+              )}
+
+              {selectedProfilePost.attachedCertificate && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedCertificatePreview(selectedProfilePost.attachedCertificate || null)}
+                  className="w-full rounded-xl border border-amber-300/50 bg-amber-50 dark:bg-amber-950/20 p-3 text-left cursor-pointer"
+                >
+                  <p className="text-[10px] font-black uppercase text-amber-600">Verified Credential</p>
+                  <p className="text-xs font-bold text-slate-900 dark:text-white mt-1">{selectedProfilePost.attachedCertificate.title}</p>
+                </button>
+              )}
+
+              <div className="flex items-center gap-4 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs text-slate-500">
+                <span className="flex items-center gap-1"><span className="material-symbols-outlined text-[16px]">favorite</span>{selectedProfilePost.likesCount} likes</span>
+                <span className="flex items-center gap-1"><span className="material-symbols-outlined text-[16px]">chat_bubble</span>{selectedProfilePost.commentsCount} comments</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showCreatePostModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-3 sm:p-4 animate-fade-in">
           <div className="bg-white dark:bg-[#131b2e] rounded-2xl p-4 sm:p-6 max-w-lg w-full max-h-[92vh] overflow-y-auto border border-slate-200 dark:border-slate-800 shadow-2xl space-y-4 animate-scale-up">
