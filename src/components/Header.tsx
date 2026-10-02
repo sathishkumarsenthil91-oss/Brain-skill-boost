@@ -59,11 +59,11 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <header className="fixed top-0 w-full z-50 bg-white/95 dark:bg-[#0f172a]/95 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800 shadow-xs transition-colors duration-200">
-      <div className="flex justify-between items-center px-4 sm:px-6 h-16 w-full max-w-7xl mx-auto">
+      <div className="flex justify-between items-center gap-1.5 px-2.5 min-[390px]:px-4 sm:px-6 h-16 w-full max-w-7xl mx-auto">
         {/* Brand Logo & Name with Unique Animation */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1.5 min-[390px]:gap-3 min-w-0">
           <BrainboostLogo
-            size="md"
+            size={34}
             showText={true}
             animated={true}
             onClick={() => onNavigate('dashboard')}
@@ -254,7 +254,7 @@ export const Header: React.FC<HeaderProps> = ({
         </nav>
 
         {/* Right Actions: AI Copilot Quick Button, Theme Toggle, User Profile Avatar */}
-        <div className="flex items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-1 min-[390px]:gap-2 sm:gap-3 shrink-0">
           {/* Smart Copilot Quick Launcher */}
           {onOpenCopilot && (
             <button
@@ -270,7 +270,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             onClick={onToggleTheme}
             aria-label="Toggle theme"
-            className="w-9 h-9 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#1e293b] flex items-center justify-center text-slate-700 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 shadow-xs transition-all cursor-pointer"
+            className="w-8 h-8 min-[390px]:w-9 min-[390px]:h-9 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#1e293b] flex items-center justify-center text-slate-700 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 shadow-xs transition-all cursor-pointer"
           >
             <span className="material-symbols-outlined text-[18px]">
               {isDarkMode ? 'light_mode' : 'dark_mode'}
@@ -283,7 +283,7 @@ export const Header: React.FC<HeaderProps> = ({
             className="flex items-center gap-2 cursor-pointer p-1 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/60 transition-colors"
             title="View My Profile"
           >
-            <div className="h-8 w-8 rounded-full overflow-hidden border-2 border-blue-500/30 shadow-xs">
+            <div className="h-7 w-7 min-[390px]:h-8 min-[390px]:w-8 rounded-full overflow-hidden border-2 border-blue-500/30 shadow-xs">
               <img
                 src={user.avatarUrl}
                 alt={user.name}
@@ -303,7 +303,7 @@ export const Header: React.FC<HeaderProps> = ({
                 onNavigate('auth');
               }
             }}
-            className="text-xs font-bold text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 px-2 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer flex items-center gap-1"
+            className="text-xs font-bold text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 px-1 min-[390px]:px-2 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer flex items-center gap-1"
             title="Sign Out"
           >
             <span className="material-symbols-outlined text-[16px]">logout</span>
