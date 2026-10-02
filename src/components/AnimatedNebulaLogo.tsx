@@ -14,7 +14,9 @@ export const AnimatedNebulaLogo: React.FC<AnimatedNebulaLogoProps> = ({
   title = 'Nebula AI',
   intensity = 'normal',
 }) => {
-  const glow = intensity === 'soft' ? '0 0 8px rgba(88,170,255,.28)' : '0 0 14px rgba(90,160,255,.5)';
+  const glow = intensity === 'soft'
+    ? '0 0 8px rgba(88,170,255,.32)'
+    : '0 0 12px rgba(34,211,238,.85), 0 0 24px rgba(99,102,241,.75), 0 0 38px rgba(217,70,239,.55)';
 
   return (
     <span
