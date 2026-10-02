@@ -239,7 +239,8 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
   // Auto-scroll to bottom of chat when new message arrives or chat opened
   useEffect(() => {
     if (activeTab === 'chat' && activeChatUser) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      const messageList = messagesEndRef.current?.parentElement;
+      messageList?.scrollTo({ top: messageList.scrollHeight, behavior: 'smooth' });
     }
   }, [conversations, activeTab, activeChatUser]);
 
@@ -1118,8 +1119,8 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
       {/* 2. CHAT TAB: Real User 1-on-1 Direct Messaging (Full Responsive Viewport) */}
       {/* ========================================================================= */}
       {activeTab === 'chat' && (
-        <div className="w-full h-[calc(100vh-11rem)] md:h-[calc(100vh-8.5rem)] px-2 sm:px-4 md:px-6 py-2 sm:py-3 flex flex-col min-h-0 flex-1">
-          <div className="bg-white dark:bg-[#131b2e] rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm overflow-hidden flex-1 grid grid-cols-1 md:grid-cols-12 min-h-0">
+        <div className="w-full h-[calc(100dvh-15rem)] min-h-[320px] px-2 sm:px-4 md:px-6 py-2 sm:py-3 mb-20 flex flex-col shrink-0">
+          <div className="bg-white dark:bg-[#131b2e] rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm overflow-hidden h-full grid grid-cols-1 md:grid-cols-12 grid-rows-[minmax(0,1fr)] min-h-0">
             {/* Conversations Sidebar (Col 1-5) */}
             <div
               className={`md:col-span-5 lg:col-span-4 border-r border-slate-200 dark:border-slate-800 flex flex-col h-full min-h-0 ${
@@ -1163,7 +1164,7 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
                     return (
                       <div
                         key={peerUser.id}
-                        onClick={() => setActiveChatUser(peerUser)}
+                        onClick={() => openChatWithUser(peerUser)}
                         className={`p-3 sm:p-3.5 flex items-center gap-3 cursor-pointer transition-all ${
                           isSelected
                             ? 'bg-purple-50 dark:bg-purple-950/40 border-l-4 border-purple-600'
@@ -1305,11 +1306,13 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
                       type="text"
                       value={chatMessageText}
                       onChange={(e) => setChatMessageText(e.target.value)}
+                      aria-label="Chat message"
                       placeholder={`Message ${activeChatUser.name.split(' ')[0]}...`}
                       className="flex-1 bg-slate-100 dark:bg-slate-800/60 rounded-xl px-3 sm:px-4 py-2 sm:py-2.5 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 outline-none border border-transparent focus:border-purple-500 min-w-0"
                     />
                     <button
                       type="submit"
+                      aria-label="Send message"
                       disabled={!chatMessageText.trim()}
                       className="p-2 sm:p-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 text-white disabled:opacity-40 hover:from-purple-500 hover:to-indigo-500 transition-all cursor-pointer shrink-0 shadow-xs"
                     >
@@ -2421,4 +2424,5 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
     </div>
   );
 };
+
 
