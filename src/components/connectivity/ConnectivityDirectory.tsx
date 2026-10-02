@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { NetworkUser, UserProfile } from '../../types';
 import { connectivityService } from '../../services/supabaseService';
 
@@ -17,6 +17,7 @@ export const ConnectivityDirectory: React.FC<ConnectivityDirectoryProps> = ({
   onFollowToggle,
   onOpenChat,
 }) => {
+  const memberRowRef = useRef<HTMLDivElement>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterTab, setFilterTab] = useState<'all' | 'friends' | 'followers' | 'following'>('all');
   const [liveSearchResults, setLiveSearchResults] = useState<NetworkUser[] | null>(null);
@@ -76,13 +77,13 @@ export const ConnectivityDirectory: React.FC<ConnectivityDirectoryProps> = ({
   });
 
   return (
-    <div className="bg-white dark:bg-[#131b2e] rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-xs p-4 sm:p-5 space-y-4">
+    <div className="min-w-0 bg-white dark:bg-[#131b2e] rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-xs p-4 sm:p-5 space-y-4">
       {/* Header & Title */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
             <span className="material-symbols-outlined text-purple-600 text-[20px]">group_search</span>
-            Network Directory & Peer Discovery
+            Suggested Peers & Network Discovery
           </h3>
           <p className="text-[11px] text-slate-500 dark:text-slate-400">
             Search across registered Supabase members by handle, skills, and direct message in real-time.
@@ -144,8 +145,12 @@ export const ConnectivityDirectory: React.FC<ConnectivityDirectoryProps> = ({
         ))}
       </div>
 
-      {/* User Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 pt-1">
+      <div className="flex justify-end gap-2">
+        <button type="button" aria-label="Previous suggested members" onClick={() => memberRowRef.current?.scrollBy({left:-300,behavior:'smooth'})} className="rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-1 text-purple-600">‹</button>
+        <button type="button" aria-label="Next suggested members" onClick={() => memberRowRef.current?.scrollBy({left:300,behavior:'smooth'})} className="rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-1 text-purple-600">›</button>
+      </div>
+      {/* Suggested members scroll within this row, after the posts feed. */}
+      <div ref={memberRowRef} aria-label="Suggested members" tabIndex={0} className="flex gap-3.5 overflow-x-auto overscroll-x-contain snap-x snap-mandatory pt-1 pb-3">
         {filteredUsers.length === 0 ? (
           <div className="col-span-full text-center py-12 px-4 text-slate-400 bg-slate-50/50 dark:bg-slate-900/30 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800">
             <span className="material-symbols-outlined text-4xl text-purple-400 mb-2">
@@ -167,7 +172,7 @@ export const ConnectivityDirectory: React.FC<ConnectivityDirectoryProps> = ({
             return (
               <div
                 key={member.id}
-                className="p-3.5 sm:p-4 rounded-2xl bg-slate-50/70 dark:bg-slate-800/40 border border-slate-200/70 dark:border-slate-700/60 flex flex-col justify-between gap-3 hover:border-purple-300 dark:hover:border-purple-700 transition-all group"
+                className="w-72 max-w-full shrink-0 snap-start p-3.5 sm:p-4 rounded-2xl bg-slate-50/70 dark:bg-slate-800/40 border border-slate-200/70 dark:border-slate-700/60 flex flex-col justify-between gap-3 hover:border-purple-300 dark:hover:border-purple-700 transition-all group"
               >
                 <div>
                   {/* Member Top Bar: Avatar, Name, Handle & Status */}
