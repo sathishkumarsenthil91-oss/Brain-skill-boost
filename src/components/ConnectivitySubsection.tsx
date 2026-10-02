@@ -714,7 +714,6 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
       {/* ========================================================================= */}
       {activeTab === 'home' && (
         <div className="max-w-7xl mx-auto w-full px-3 sm:px-6 lg:px-8 py-5 pb-28 min-w-0 flex-1">
-          <div className="lg:hidden mb-5"><SuggestedPeers users={users} onSelect={(peer) => { setViewingUser(peer); setActiveTab('profile'); }} onFollow={handleFollowToggle} /></div>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 items-start">
             {/* Main Feed Column (Cols 1-2 on desktop, full width on mobile) */}
             <div className="lg:col-span-2 space-y-4 sm:space-y-6 min-w-0">
@@ -1147,8 +1146,6 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
             </button>
           </div>
 
-          <SuggestedPeers users={users} onSelect={(peer) => { setViewingUser(peer); setActiveTab('profile'); }} onFollow={handleFollowToggle} />
-
           {/* Trending Tech Discussions */}
           <div className="bg-white dark:bg-[#131b2e] rounded-2xl p-5 border border-slate-200/80 dark:border-slate-800/80 shadow-xs space-y-2.5">
             <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
@@ -1167,6 +1164,7 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
           </div>
         </aside>
       </div>
+      <div className="mt-5"><SuggestedPeers users={users} onSelect={(peer) => { setViewingUser(peer); setActiveTab('profile'); }} onFollow={handleFollowToggle} /></div>
     </div>
   )}
 
