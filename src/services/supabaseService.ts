@@ -501,8 +501,6 @@ export const connectivityService = {
           .limit(30);
 
         if (!error && Array.isArray(data)) {
-          const verificationByUser = await fetchVerificationEvidence(data.map((row: any) => row.id));
-
           const peers = data.filter((row: any) => {
             if (myUid && row.id === myUid) return false;
             if (currentEmail && row.email?.toLowerCase().trim() === currentEmail) return false;
