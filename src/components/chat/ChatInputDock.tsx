@@ -68,9 +68,9 @@ export const ChatInputDock: React.FC<ChatInputDockProps> = ({
   };
 
   return (
-    <div className="w-full max-w-3xl md:max-w-4xl mx-auto px-3 sm:px-6 pb-3 sm:pb-4 pt-1">
+    <div className="w-full max-w-3xl md:max-w-4xl mx-auto px-2.5 sm:px-6 pb-2 sm:pb-4 pt-1">
       {/* Floating ChatGPT Capsule */}
-      <div className="relative rounded-3xl bg-white dark:bg-[#212121] border border-slate-300 dark:border-[#383838] focus-within:border-slate-400 dark:focus-within:border-[#555555] shadow-lg dark:shadow-2xl transition-all p-2.5 sm:p-3 space-y-2">
+      <div className="relative rounded-[1.35rem] sm:rounded-3xl bg-white dark:bg-[#212121] border border-slate-300 dark:border-[#383838] focus-within:border-slate-400 dark:focus-within:border-[#555555] shadow-lg dark:shadow-2xl transition-all p-2 sm:p-3 space-y-1.5 sm:space-y-2">
         {/* Main Textarea */}
         <textarea
           ref={textareaRef}
@@ -83,13 +83,13 @@ export const ChatInputDock: React.FC<ChatInputDockProps> = ({
               ? `Listening in ${selectedLanguageName}...`
               : `Ask Nebula AI anything (${selectedLanguageName})...`
           }
-          className="w-full bg-transparent border-none outline-none resize-none px-2 text-sm sm:text-[15px] leading-relaxed text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 max-h-40 min-h-[24px]"
+          className="w-full bg-transparent border-none outline-none resize-none px-2 text-sm sm:text-[15px] leading-relaxed text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 max-h-24 sm:max-h-40 min-h-[22px]"
         />
 
         {/* Bottom Action Row (ChatGPT Style) */}
-        <div className="flex items-center justify-between gap-1 pt-1">
+        <div className="flex items-center justify-between gap-1 pt-0.5 sm:pt-1">
           {/* Left Controls: Attach Code, Voice, Mode, Thinking */}
-          <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap">
+          <div className="flex items-center gap-0.5 sm:gap-1.5 min-w-0">
             {/* Attach Code Modal Trigger */}
             <button
               type="button"
@@ -121,7 +121,7 @@ export const ChatInputDock: React.FC<ChatInputDockProps> = ({
               <select
                 value={activeMode}
                 onChange={(e) => onChangeMode(e.target.value as AIMode)}
-                className="appearance-none bg-slate-100 dark:bg-[#2b2b2b] hover:bg-slate-200 dark:hover:bg-[#333333] text-slate-700 dark:text-slate-300 text-[11px] font-semibold py-1 pl-2.5 pr-6 rounded-xl border border-slate-200 dark:border-[#383838] outline-none cursor-pointer"
+                className="appearance-none max-w-[132px] sm:max-w-none bg-slate-100 dark:bg-[#2b2b2b] hover:bg-slate-200 dark:hover:bg-[#333333] text-slate-700 dark:text-slate-300 text-[10px] sm:text-[11px] font-semibold py-1 pl-2 pr-5 sm:pl-2.5 sm:pr-6 rounded-xl border border-slate-200 dark:border-[#383838] outline-none cursor-pointer truncate"
                 title="Specialization Mode"
               >
                 <option value="career">🎓 Career & Skills</option>
@@ -182,7 +182,7 @@ export const ChatInputDock: React.FC<ChatInputDockProps> = ({
       </div>
 
       {/* ChatGPT Disclaimer */}
-      <p className="text-center text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 mt-2">
+      <p className="hidden min-[390px]:block text-center text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 mt-1.5 sm:mt-2">
         Nebula AI can make mistakes. Verify important career, technical, and offer details.
       </p>
     </div>
