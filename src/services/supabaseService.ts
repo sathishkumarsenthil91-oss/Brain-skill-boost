@@ -50,7 +50,16 @@ async function requireConnectivityUser(): Promise<string> {
 function mapNetworkMessage(row: any): NetworkMessage {
   return { id: row.id, senderId: row.sender_id, receiverId: row.receiver_id, content: row.content,
     timestamp: new Date(row.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    isRead: Boolean(row.is_read) };
+    isRead: Boolean(row.is_read), deliveredAt: row.delivered_at, readAt: row.read_at, attachmentPath: row.attachment_path };
+}
+
+async function hydrateMessagePhoto(row: any): Promise<NetworkMessage> {
+  const message = mapNetworkMessage(row);
+  if (message.attachmentPath) {
+    const { data } = await existingSupabaseClient.storage.from('chat-photos').createSignedUrl(message.attachmentPath, 3600);
+    message.attachmentUrl = data?.signedUrl;
+  }
+  return message;
 }
 
 // Local storage persistent keys for backup / fast offline cache
@@ -265,7 +274,8 @@ export function mapRowToNetworkUser(row: any, currentUserId?: string): NetworkUs
     projects: [],
     internships: [],
     achievements: [],
-    onlineStatus: row.portfolio_url || row.portfolioUrl ? 'online' : 'offline',
+    onlineStatus: row.online_status === 'online' && Date.now() - new Date(row.last_seen_at || 0).getTime() < 90000 ? 'online' : 'offline',
+    lastSeenAt: row.last_seen_at, onlineAt: row.online_at,
   };
 }
 
@@ -312,7 +322,7 @@ export function mapProfileToNetworkUser(user: UserProfile, libraryItems?: UserLi
     projects: user.projects || [],
     internships: user.internships || [],
     achievements: user.achievements || [],
-    onlineStatus: user.portfolioUrl ? 'online' : 'offline',
+    onlineStatus: 'offline',
   };
 }
 
@@ -1069,13 +1079,37 @@ export const connectivityService = {
     return [];
   },
 
+  startActivityTracking(): () => void {
+    let stopped = false;
+    let wasActive = false;
+    const heartbeat = async () => {
+      try {
+        const uid = await requireConnectivityUser();
+        if (stopped) return;
+        const active = navigator.onLine && document.visibilityState === 'visible';
+        const fields: Record<string, string> = { online_status: active ? 'online' : 'offline', last_seen_at: new Date().toISOString() };
+        if (active && !wasActive) fields.online_at = fields.last_seen_at;
+        wasActive = active;
+        await existingSupabaseClient.from('profiles').update(fields).eq('id', uid);
+      } catch { /* An expired heartbeat naturally shows offline after 90 seconds. */ }
+    };
+    heartbeat();
+    const timer = window.setInterval(heartbeat, 30000);
+    document.addEventListener('visibilitychange', heartbeat);
+    window.addEventListener('online', heartbeat);
+    window.addEventListener('offline', heartbeat);
+    return () => { stopped = true; window.clearInterval(timer); document.removeEventListener('visibilitychange', heartbeat); window.removeEventListener('online', heartbeat); window.removeEventListener('offline', heartbeat); };
+  },
+
   async fetchConversations(currentUser: UserProfile): Promise<NetworkConversation[]> {
     const uid = await requireConnectivityUser();
     const { data, error } = await existingSupabaseClient.from('network_messages')
       .select('*').or(`sender_id.eq.${uid},receiver_id.eq.${uid}`)
       .order('created_at', { ascending: false }).limit(500);
     if (error) throw error;
+    await existingSupabaseClient.from('network_messages').update({ delivered_at: new Date().toISOString() }).eq('receiver_id', uid).is('delivered_at', null);
     const rows = (data || []).reverse();
+    const hydrated = new Map((await Promise.all(rows.map(hydrateMessagePhoto))).map(msg => [msg.id, msg]));
     const peerIds = [...new Set(rows.map(row => row.sender_id === uid ? row.receiver_id : row.sender_id))];
     if (!peerIds.length) { this.saveConversations([], currentUser); return []; }
     const { data: profiles, error: profileError } = await existingSupabaseClient.from('profiles')
@@ -1087,7 +1121,7 @@ export const connectivityService = {
       const peerId = row.sender_id === uid ? row.receiver_id : row.sender_id;
       const participant = peers.get(peerId);
       if (!participant) continue;
-      const msg = mapNetworkMessage(row);
+      const msg = hydrated.get(row.id)!;
       const conv = grouped.get(peerId) || { id: row.conversation_id || `conv-${peerId}`,
         participant, lastMessage: '', lastMessageTime: '', unreadCount: 0, messages: [] };
       conv.messages.push(msg);
@@ -1119,7 +1153,7 @@ export const connectivityService = {
       .or(`and(sender_id.eq.${uid},receiver_id.eq.${targetUid}),and(sender_id.eq.${targetUid},receiver_id.eq.${uid})`)
       .order('created_at', { ascending: false }).limit(150);
     if (error) throw error;
-    const messages = (data || []).reverse().map(mapNetworkMessage);
+    const messages = await Promise.all((data || []).reverse().map(hydrateMessagePhoto));
     const { error: readError } = await existingSupabaseClient.from('network_messages')
       .update({ is_read: true }).eq('sender_id', targetUid).eq('receiver_id', uid).eq('is_read', false);
     if (readError) console.warn('Could not mark messages as read', readError);
@@ -1130,24 +1164,34 @@ export const connectivityService = {
   },
 
   // Send real-time chat message with broadcast & Supabase sync
-  async sendMessage(participant: NetworkUser, content: string, currentUser: UserProfile)
+  async sendMessage(participant: NetworkUser, content: string, currentUser: UserProfile, photo?: File)
     : Promise<{ updatedConversations: NetworkConversation[]; newMsg: NetworkMessage }> {
     const sender = await requireConnectivityUser();
     const receiver = await resolveTargetUuid(existingSupabaseClient, participant.id);
     if (!receiver || sender === receiver) throw new Error('Select another registered member to chat.');
-    if (!content.trim()) throw new Error('Message cannot be empty.');
+    if (!content.trim() && !photo) throw new Error('Message cannot be empty.');
+    if (photo && (!['image/jpeg', 'image/png', 'image/webp'].includes(photo.type) || photo.size > 5 * 1024 * 1024)) throw new Error('Choose a JPG, PNG, or WebP photo under 5 MB.');
     const [one, two] = [sender, receiver].sort();
     // Deterministic ordering prevents duplicate conversations when both peers send together.
     const { data: conversation, error: convError } = await existingSupabaseClient.from('network_conversations')
       .upsert({ participant_one_id: one, participant_two_id: two },
         { onConflict: 'participant_one_id,participant_two_id' }).select('id').single();
     if (convError) throw convError;
+    let attachmentPath: string | undefined;
+    if (photo) {
+      attachmentPath = `${sender}/${crypto.randomUUID()}.${photo.type.split('/')[1]}`;
+      const { error: uploadError } = await existingSupabaseClient.storage.from('chat-photos').upload(attachmentPath, photo, { contentType: photo.type });
+      if (uploadError) throw uploadError;
+    }
     const { data, error } = await existingSupabaseClient.from('network_messages').insert({
       conversation_id: conversation.id, sender_id: sender, receiver_id: receiver,
-      content: content.trim(), is_read: false,
+      content: content.trim() || "Photo", is_read: false, attachment_path: attachmentPath,
     }).select('*').single();
-    if (error) throw error;
-    const newMsg = mapNetworkMessage(data);
+    if (error) {
+      if (attachmentPath) await existingSupabaseClient.storage.from('chat-photos').remove([attachmentPath]);
+      throw error;
+    }
+    const newMsg = await hydrateMessagePhoto(data);
     const convs = this.getConversations(currentUser);
     const existing = convs.find(conv => conv.participant.id === receiver);
     const updatedConv = { id: conversation.id, participant: { ...participant, id: receiver },
@@ -1162,7 +1206,8 @@ export const connectivityService = {
   // Supabase Realtime automatically reconnects after brief socket/network interruptions, so
   // transient CHANNEL_ERROR/TIMED_OUT states should not be promoted to a persistent UI error.
   subscribeToRealtimeChat(currentUser: UserProfile,
-    onIncomingMessage: (msg: NetworkMessage, participant: NetworkUser) => void): () => void {
+    onIncomingMessage: (msg: NetworkMessage, participant: NetworkUser) => void,
+    onReceiptUpdate?: () => void): () => void {
     let channel: any;
     let disposed = false;
     let reconnectWarningTimer: number | undefined;
@@ -1186,7 +1231,8 @@ export const connectivityService = {
           const { data: profile } = await existingSupabaseClient.from('profiles').select('*')
             .eq('id', row.sender_id).maybeSingle();
           if (disposed || !profile) return;
-          const msg = mapNetworkMessage(row);
+          await existingSupabaseClient.from('network_messages').update({ delivered_at: new Date().toISOString() }).eq('id', row.id).eq('receiver_id', uid).is('delivered_at', null);
+          const msg = await hydrateMessagePhoto(row);
           const participant = mapRowToNetworkUser(profile, uid);
           const convs = this.getConversations(currentUser);
           let conv = convs.find(c => c.participant.id === participant.id);
@@ -1197,9 +1243,10 @@ export const connectivityService = {
           }
           if (!conv.messages.some(m => m.id === msg.id)) conv.messages.push(msg);
           conv.lastMessage = msg.content; conv.lastMessageTime = msg.timestamp; conv.unreadCount++;
-          this.saveConversations(convs, currentUser);
+          const ordered = [conv, ...convs.filter(c => c.participant.id !== participant.id)];
+          this.saveConversations(ordered, currentUser);
           onIncomingMessage(msg, participant);
-        }).subscribe((status, error) => {
+        }).on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'network_messages', filter: `sender_id=eq.${uid}` }, () => onReceiptUpdate?.()).subscribe((status, error) => {
           if (disposed) return;
 
           if (status === 'SUBSCRIBED') {
