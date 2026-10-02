@@ -1,7 +1,7 @@
 import { apiFetch } from '../services/api';
 import React, { useState } from 'react';
 import { ViewType, UserProfile } from '../types';
-import { NEBULA_LOGO_URL } from '../data/mockData';
+import { AnimatedNebulaLogo } from './AnimatedNebulaLogo';
 import { BrainboostLogo } from './BrainboostLogo';
 
 interface OnboardingWizardProps {
@@ -419,13 +419,8 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
       {/* Step 4: AI Synthesis Animation Screen */}
       {step === 4 && (
         <div className="bg-white dark:bg-[#1e293b] rounded-3xl p-8 w-full neu-raised text-center space-y-6 animate-in zoom-in-95">
-          <div className="w-20 h-20 rounded-full bg-blue-50 dark:bg-blue-950/80 mx-auto flex items-center justify-center ai-glow border-2 border-blue-200 dark:border-blue-800">
-            <img
-              src={NEBULA_LOGO_URL}
-              alt="Nebula AI"
-              className="w-full h-full object-cover rounded-full animate-bounce"
-              referrerPolicy="no-referrer"
-            />
+          <div className="w-20 h-20 rounded-full bg-slate-950 mx-auto flex items-center justify-center ai-glow border-2 border-blue-200 dark:border-blue-800">
+            <AnimatedNebulaLogo size={72} />
           </div>
 
           <div>
