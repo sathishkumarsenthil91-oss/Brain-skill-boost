@@ -12,7 +12,6 @@ import {
 import { connectivityService, mapProfileToNetworkUser, isSupabaseConfigured } from '../services/supabaseService';
 import { CertificateGenerationModal } from './CertificateGenerationModal';
 import { ConnectivityProfileSetupModal } from './connectivity/ConnectivityProfileSetupModal';
-import { SuggestedPeers } from './connectivity/SuggestedPeers';
 import { ConnectivityDirectory } from './connectivity/ConnectivityDirectory';
 import { FollowersFollowingModal } from './connectivity/FollowersFollowingModal';
 
@@ -762,19 +761,6 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
             </div>
           </div>
 
-          {/* Network Directory & Peer Discovery */}
-          <ConnectivityDirectory
-            users={users}
-            currentUser={user}
-            onSelectUser={(targetUser) => {
-              setViewingUser(targetUser);
-              setActiveTab('profile');
-            }}
-            onFollowToggle={handleFollowToggle}
-            onOpenChat={openChatWithUser}
-          />
-
-
           {/* Posts Feed */}
           <div className="space-y-4 sm:space-y-6">
             {filteredPosts.map((post) => {
@@ -1164,7 +1150,19 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
           </div>
         </aside>
       </div>
-      <div className="mt-5"><SuggestedPeers users={users} onSelect={(peer) => { setViewingUser(peer); setActiveTab('profile'); }} onFollow={handleFollowToggle} /></div>
+      <div className="mt-5">
+{/* Network Directory & Peer Discovery */}
+          <ConnectivityDirectory
+            users={users}
+            currentUser={user}
+            onSelectUser={(targetUser) => {
+              setViewingUser(targetUser);
+              setActiveTab('profile');
+            }}
+            onFollowToggle={handleFollowToggle}
+            onOpenChat={openChatWithUser}
+          />
+      </div>
     </div>
   )}
 
