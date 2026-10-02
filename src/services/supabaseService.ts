@@ -964,12 +964,24 @@ export const connectivityService = {
     return { updatedConversations, newMsg };
   },
 
-  // Subscribe to real-time incoming messages for current user across Broadcast and DB Postgres Changes
+  // Subscribe to real-time incoming messages for current user across DB Postgres Changes.
+  // Supabase Realtime automatically reconnects after brief socket/network interruptions, so
+  // transient CHANNEL_ERROR/TIMED_OUT states should not be promoted to a persistent UI error.
   subscribeToRealtimeChat(currentUser: UserProfile,
     onIncomingMessage: (msg: NetworkMessage, participant: NetworkUser) => void): () => void {
     let channel: any;
     let disposed = false;
+    let reconnectWarningTimer: number | undefined;
+    let reconnectWarningShown = false;
     const seen = new Set<string>();
+
+    const clearReconnectWarningTimer = () => {
+      if (reconnectWarningTimer !== undefined) {
+        window.clearTimeout(reconnectWarningTimer);
+        reconnectWarningTimer = undefined;
+      }
+    };
+
     requireConnectivityUser().then(uid => {
       if (disposed) return;
       channel = existingSupabaseClient.channel(`network-chat-${uid}-${crypto.randomUUID()}`)
@@ -993,12 +1005,40 @@ export const connectivityService = {
           conv.lastMessage = msg.content; conv.lastMessageTime = msg.timestamp; conv.unreadCount++;
           this.saveConversations(convs, currentUser);
           onIncomingMessage(msg, participant);
-        }).subscribe(status => {
-          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT')
-            reportServiceError('Live chat connection interrupted. Saved messages will refresh automatically.');
+        }).subscribe((status, error) => {
+          if (disposed) return;
+
+          if (status === 'SUBSCRIBED') {
+            clearReconnectWarningTimer();
+            if (reconnectWarningShown) {
+              reconnectWarningShown = false;
+              reportServiceError('');
+            }
+            return;
+          }
+
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+            console.warn('Realtime chat reconnect notice:', status, error || '');
+            clearReconnectWarningTimer();
+
+            // Give the SDK time to reconnect before surfacing anything to the user.
+            reconnectWarningTimer = window.setTimeout(() => {
+              reconnectWarningTimer = undefined;
+              if (disposed || channel?.state === 'joined') return;
+              reconnectWarningShown = true;
+              reportServiceError('Live chat is reconnecting. Messages are still saved and will sync automatically.');
+            }, 12000);
+          }
         });
-    }).catch(error => reportServiceError(error.message));
-    return () => { disposed = true; if (channel) existingSupabaseClient.removeChannel(channel); };
+    }).catch(error => {
+      if (!disposed) reportServiceError(error.message);
+    });
+
+    return () => {
+      disposed = true;
+      clearReconnectWarningTimer();
+      if (channel) existingSupabaseClient.removeChannel(channel);
+    };
   },
 
   // Subscribe to live network events (follow/unfollow, live count changes)
