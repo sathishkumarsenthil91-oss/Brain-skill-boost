@@ -22,15 +22,20 @@ createRoot(document.getElementById('root')).render(React.createElement(Connectiv
 (async()=>{const b=await chromium.launch({channel:'chrome',headless:true});try{
 for(const viewport of [{width:1920,height:880},{width:390,height:844}]){
 const page=await b.newPage({viewport});page.on('pageerror',e=>console.error(e));await page.goto('http://localhost:3000/chat-layout-check.html');
-await page.getByRole('button',{name:'person My Profile',exact:true}).click();
-await page.getByRole('button',{name:'9 Following',exact:true}).waitFor();
-await page.getByRole('button',{name:'3 Followers',exact:true}).waitFor();
 await page.getByRole('button',{name:/Chat/}).first().click();
 await page.getByRole('heading',{name:'Layout Peer 0',exact:true}).click();
 await page.getByText('Saved history loaded',{exact:true}).last().waitFor();
 const input=page.getByRole('textbox',{name:'Chat message'});await input.waitFor();
 const box=await input.boundingBox();assert.ok(box&&box.y>=0&&box.y+box.height<=viewport.height,JSON.stringify(box));
 await input.fill('Visible composer');assert.equal(await page.getByRole('button',{name:'Send message',exact:true}).isEnabled(),true);
+const nav=page.locator('nav').last();const navBox=await nav.boundingBox();assert.ok(box.y+box.height+8<navBox.y);
+if(viewport.width===390){
+ await page.evaluate(()=>{const vv=new EventTarget();Object.assign(vv,{height:500,offsetTop:0});Object.defineProperty(window,'visualViewport',{configurable:true,value:vv});window.dispatchEvent(new Event('resize'));});
+ await page.waitForTimeout(100);
+ const keyboardBox=await input.boundingBox();const keyboardNav=await nav.boundingBox();assert.ok(keyboardBox.y+keyboardBox.height+8<keyboardNav.y&&keyboardNav.y+keyboardNav.height<=501);
+ await page.evaluate(()=>{window.visualViewport.height=844;window.visualViewport.dispatchEvent(new Event('resize'));});
+ await page.waitForTimeout(100);
+}
 await page.screenshot({path:'../chat-layout-'+viewport.width+'.png'});console.log('PASS visible composer and saved history at '+viewport.width+'px');await page.close();
 }}finally{await b.close();fs.unlinkSync(harness);}})().catch(e=>{console.error(e);fs.rmSync(harness,{force:true});process.exitCode=1;});
 

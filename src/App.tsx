@@ -8,7 +8,7 @@ import { LandingHero } from './components/LandingHero';
 import { DashboardView } from './components/DashboardView';
 import { AnimatedNebulaLogo } from './components/AnimatedNebulaLogo';
 import { supabase } from './supabaseClient';
-import { supabaseService } from './services/supabaseService';
+import { connectivityService, supabaseService } from './services/supabaseService';
 
 // Lazy load secondary views for instant initial paint and minimal bundle footprint
 const ProfileView = lazy(() => import('./components/ProfileView').then((m) => ({ default: m.ProfileView })));
@@ -115,6 +115,20 @@ export default function App() {
     url: '',
     content: '',
   });
+
+  useEffect(() => {
+    if (!user.id) return;
+    return connectivityService.startActivityTracking();
+  }, [user.id]);
+
+  const [messageNotice, setMessageNotice] = useState<{ name: string; peerId: string } | null>(null);
+  useEffect(() => {
+    if (!user.id || currentView === 'connectivity' || currentView === 'network') return;
+    return connectivityService.subscribeToRealtimeChat(user, (_message, peer) => {
+      setMessageNotice({ name: peer.name, peerId: peer.id });
+      if ('Notification' in window && Notification.permission === 'granted' && document.visibilityState !== 'visible') new Notification('Brain Boost message', { body: `New message from ${peer.name}`, tag: peer.id });
+    });
+  }, [user.id, currentView]);
 
   // Sync dark mode class with root html element and localStorage
   useEffect(() => {
@@ -341,6 +355,8 @@ export default function App() {
 
   const handleSignOut = async () => {
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) await supabase.from('profiles').update({ online_status: 'offline', last_seen_at: new Date().toISOString() }).eq('id', session.user.id);
       await supabase.auth.signOut();
     } catch (err) {
       console.error(err);
@@ -371,6 +387,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#f8fafc] dark:bg-[#0b1329] text-[#0f172a] dark:text-[#f8fafc] transition-colors duration-200">
+      {messageNotice && <button type="button" onClick={() => { setMessageNotice(null); handleNavigate('connectivity'); }} className="fixed top-20 right-4 z-[100] rounded-xl bg-purple-600 text-white p-3 shadow-lg">New message from {messageNotice.name} — open Connectivity</button>}
       {serviceError && <div role="alert" className="fixed bottom-20 left-4 right-4 z-[100] rounded-xl bg-red-50 p-4 text-red-800 shadow-lg">
         {serviceError}<button className="ml-4 underline" onClick={() => setServiceError('')}>Dismiss</button>
       </div>}

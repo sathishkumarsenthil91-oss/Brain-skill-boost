@@ -237,6 +237,8 @@ export interface NetworkUser {
   internships: UserInternship[];
   achievements: UserAchievement[];
   onlineStatus: 'online' | 'idle' | 'offline';
+  lastSeenAt?: string;
+  onlineAt?: string;
   currentlyStudyingStory?: {
     topic: string;
     courseTitle: string;
@@ -290,6 +292,10 @@ export interface NetworkPost {
 }
 
 export interface NetworkMessage {
+  deliveredAt?: string;
+  readAt?: string;
+  attachmentPath?: string;
+  attachmentUrl?: string;
   id: string;
   senderId: string;
   receiverId: string;

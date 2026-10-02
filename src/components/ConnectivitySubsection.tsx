@@ -94,6 +94,41 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
   // Active chat conversation
   const [activeChatUser, setActiveChatUser] = useState<NetworkUser | null>(null);
   const [chatMessageText, setChatMessageText] = useState('');
+  const [chatPhoto, setChatPhoto] = useState<File | null>(null);
+  const [chatPhotoPreview, setChatPhotoPreview] = useState('');
+  const [sendingChat, setSendingChat] = useState(false);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const activeChatRef = useRef<string | null>(null);
+  activeChatRef.current = activeTab === 'chat' ? activeChatUser?.id || null : null;
+  useEffect(() => {
+    if (!chatPhoto) { setChatPhotoPreview(''); return; }
+    const url = URL.createObjectURL(chatPhoto); setChatPhotoPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [chatPhoto]);
+  const statusLabel = (peer: NetworkUser) => peer.onlineStatus === 'online' ? `Online${peer.onlineAt ? ` since ${new Date(peer.onlineAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}` : ''}` : peer.lastSeenAt ? `Last seen ${new Date(peer.lastSeenAt).toLocaleString()}` : 'Offline';
+  const sectionHeaderRef = useRef<HTMLElement>(null);
+  const bottomNavRef = useRef<HTMLElement>(null);
+  const [chatBounds, setChatBounds] = useState({ top: 144, bottom: 80, keyboardInset: 0 });
+  useEffect(() => {
+    if (activeTab !== 'chat') return;
+    const measure = () => {
+      const viewport = window.visualViewport;
+      const visibleBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
+      const keyboardInset = Math.max(0, window.innerHeight - visibleBottom);
+      setChatBounds({ top: (sectionHeaderRef.current?.getBoundingClientRect().bottom || 144) + 8,
+        bottom: keyboardInset + (bottomNavRef.current?.getBoundingClientRect().height || 72) + 12, keyboardInset });
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const observer = new ResizeObserver(measure);
+    if (sectionHeaderRef.current) observer.observe(sectionHeaderRef.current);
+    if (bottomNavRef.current) observer.observe(bottomNavRef.current);
+    window.addEventListener('resize', measure);
+    window.visualViewport?.addEventListener('resize', measure);
+    window.visualViewport?.addEventListener('scroll', measure);
+    measure();
+    return () => { document.body.style.overflow = previousOverflow; observer.disconnect(); window.removeEventListener('resize', measure); window.visualViewport?.removeEventListener('resize', measure); window.visualViewport?.removeEventListener('scroll', measure); };
+  }, [activeTab]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Modals
@@ -228,18 +263,7 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
         setConversations((prevConvs) => {
           const exists = prevConvs.find((c) => c.participant.id === participant.id);
           if (exists) {
-            return prevConvs.map((c) =>
-              c.participant.id === participant.id
-                ? {
-                    ...c,
-                    participant,
-                    lastMessage: newMsg.content,
-                    lastMessageTime: newMsg.timestamp,
-                    unreadCount: (c.unreadCount || 0) + 1,
-                    messages: c.messages.some(m => m.id === newMsg.id) ? c.messages : [...c.messages, newMsg],
-                  }
-                : c
-            );
+            return [{ ...exists, participant, lastMessage: newMsg.content, lastMessageTime: newMsg.timestamp, unreadCount: (exists.unreadCount || 0) + 1, messages: exists.messages.some(m => m.id === newMsg.id) ? exists.messages : [...exists.messages, newMsg] }, ...prevConvs.filter(c => c.participant.id !== participant.id)];
           } else {
             return [
               {
@@ -255,8 +279,17 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
           }
         });
 
-        showToast(`💬 New message from ${participant.name}: "${newMsg.content.substring(0, 30)}..."`);
-      }
+        if (activeChatRef.current === participant.id && document.visibilityState === 'visible') {
+          connectivityService.fetchMessagesForUser(participant.id, user).then(messages => {
+            setConversations(prev => prev.map(c => c.participant.id === participant.id ? { ...c, messages, unreadCount: 0 } : c));
+          }).catch(() => {});
+        } else {
+          showToast(`New message from ${participant.name}`);
+          if ('Notification' in window && Notification.permission === 'granted' && document.visibilityState !== 'visible') new Notification('Brain Boost message', { body: `New message from ${participant.name}`, tag: participant.id });
+        }
+
+      },
+      () => connectivityService.fetchConversations(user).then(setConversations).catch(() => {})
     );
 
     // Subscribe to live network events (follow/unfollow, live count changes across site)
@@ -278,7 +311,7 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
       if (document.visibilityState !== 'visible') return;
       try {
         const live = await connectivityService.fetchConversations(user);
-        if (!disposed) setConversations(live);
+        if (!disposed) { setConversations(live); const peers = await connectivityService.fetchUsers(user); if (!disposed) setUsers(peers); }
       } catch { /* Existing history stays visible while the connection recovers. */ }
     };
     window.addEventListener('online', refreshChat);
@@ -488,22 +521,24 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
   // Handle Send Chat Message
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!chatMessageText.trim() || !activeChatUser) return;
+    if ((!chatMessageText.trim() && !chatPhoto) || !activeChatUser || sendingChat) return;
 
     const messageText = chatMessageText.trim();
-    setChatMessageText('');
+    setSendingChat(true);
 
     try {
     const { updatedConversations } = await connectivityService.sendMessage(
       activeChatUser,
       messageText,
-      user
+      user,
+      chatPhoto || undefined
     );
     setConversations(updatedConversations);
+    setChatMessageText(''); setChatPhoto(null);
     } catch (error: any) {
       setChatMessageText(messageText);
       showToast(error.message || 'Message could not be saved. Please try again.');
-    }
+    } finally { setSendingChat(false); }
   };
 
   // Open chat with a specific user from profile or story
@@ -593,6 +628,8 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
     (r) => (r.targetUserId === 'current-user-real' || r.targetUserId === currentUserMapped.id) && r.status === 'pending'
   );
 
+  useEffect(() => { setActiveChatUser(previous => previous ? users.find(peer => peer.id === previous.id) || previous : null); }, [users]);
+
   // Active conversation object for chat tab
   const activeConversation = activeChatUser
     ? conversations.find((c) => c.participant.id === activeChatUser.id) || {
@@ -616,7 +653,7 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
       )}
 
       {/* Top Professional Header Bar */}
-      <header className="sticky top-16 z-30 bg-white/95 dark:bg-[#131b2e]/95 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800/80 px-3 sm:px-6 py-2.5 sm:py-3 flex flex-wrap items-center justify-between gap-2.5 sm:gap-3 shadow-xs">
+      <header ref={sectionHeaderRef} className="sticky top-16 z-30 bg-white/95 dark:bg-[#131b2e]/95 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800/80 px-3 sm:px-6 py-2.5 sm:py-3 flex flex-wrap items-center justify-between gap-2.5 sm:gap-3 shadow-xs">
         <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
           <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-tr from-purple-600 via-indigo-600 to-blue-500 flex items-center justify-center text-white shadow-md shadow-purple-500/20 shrink-0">
             <span className="material-symbols-outlined text-[18px] sm:text-[20px]">hub</span>
@@ -1170,7 +1207,7 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
       {/* 2. CHAT TAB: Real User 1-on-1 Direct Messaging (Full Responsive Viewport) */}
       {/* ========================================================================= */}
       {activeTab === 'chat' && (
-        <div className="w-full h-[calc(100dvh-15rem)] min-h-[320px] px-2 sm:px-4 md:px-6 py-2 sm:py-3 mb-20 flex flex-col shrink-0">
+        <div style={{ top: chatBounds.top, bottom: chatBounds.bottom }} className="fixed left-0 right-0 z-[45] px-2 sm:px-4 md:px-6 flex flex-col min-h-0">
           <div className="bg-white dark:bg-[#131b2e] rounded-2xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm overflow-hidden h-full grid grid-cols-1 md:grid-cols-12 grid-rows-[minmax(0,1fr)] min-h-0">
             {/* Conversations Sidebar (Col 1-5) */}
             <div
@@ -1188,6 +1225,7 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
                   <span className="text-[10px] sm:text-[11px] font-bold text-emerald-500 flex items-center gap-1">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                     Live Sync
+                    <button type="button" className="ml-2 text-purple-600" onClick={async () => { if (!('Notification' in window)) { showToast('Browser notifications are unavailable.'); return; } const permission = await Notification.requestPermission(); showToast(permission === 'granted' ? 'Message notifications enabled.' : 'New messages still appear in the app.'); }}>Enable notifications</button>
                   </span>
                 </div>
                 <div className="relative">
@@ -1206,7 +1244,11 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
 
               {/* Conversations List */}
               <div className="flex-1 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/60 min-h-0">
-                {users
+                {[...users].sort((a, b) => {
+                  const orderA = conversations.findIndex(c => c.participant.id === a.id);
+                  const orderB = conversations.findIndex(c => c.participant.id === b.id);
+                  return (orderA < 0 ? Infinity : orderA) - (orderB < 0 ? Infinity : orderB);
+                })
                   .filter((u) => u.name.toLowerCase().includes(chatSearch.toLowerCase()) || u.company.toLowerCase().includes(chatSearch.toLowerCase()))
                   .map((peerUser) => {
                     const conv = conversations.find((c) => c.participant.id === peerUser.id);
@@ -1239,7 +1281,8 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
                               {peerUser.name}
                             </h4>
                             <span className="text-[10px] text-slate-600 dark:text-slate-300 font-semibold shrink-0">
-                              {conv?.lastMessageTime || 'Online'}
+                              {conv?.lastMessageTime || (peerUser.onlineStatus === 'online' ? 'Online' : 'Offline')}
+                              {!!conv?.unreadCount && <span className="ml-1 rounded-full bg-purple-600 px-1.5 text-white">{conv.unreadCount}</span>}
                             </span>
                           </div>
                           <p className="text-[11px] text-slate-600 dark:text-slate-300 truncate mt-0.5">
@@ -1282,14 +1325,14 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
                             alt={activeChatUser.name}
                             className="w-8 h-8 sm:w-10 sm:h-10 rounded-full object-cover border border-slate-200 dark:border-slate-700"
                           />
-                          <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-500 border border-white" />
+                          <span className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border border-white ${activeChatUser.onlineStatus === 'online' ? 'bg-emerald-500' : 'bg-slate-400'}`} />
                         </div>
                         <div className="min-w-0">
                           <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white group-hover:text-purple-600 transition-colors truncate">
                             {activeChatUser.name}
                           </h4>
                           <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
-                            {activeChatUser.role} @ {activeChatUser.company}
+                            {statusLabel(activeChatUser)}
                           </p>
                         </div>
                       </div>
@@ -1338,9 +1381,12 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
                                   : 'bg-white dark:bg-[#1a233a] text-slate-800 dark:text-slate-200 rounded-bl-none border border-slate-200/80 dark:border-slate-800 shadow-xs'
                               }`}
                             >
+                              {msg.attachmentPath && (msg.attachmentUrl ? <a href={msg.attachmentUrl} target="_blank" rel="noreferrer"><img src={msg.attachmentUrl} alt="Shared chat photo" className="max-h-64 rounded-xl mb-2 object-contain" /></a> : <p>Photo unavailable. Reopen this chat to retry.</p>)}
                               {msg.content}
                             </div>
-                            <span className="text-[10px] text-slate-400 mt-1 px-1">{msg.timestamp}</span>
+                            <span className="text-[10px] text-slate-400 mt-1 px-1 flex gap-1 items-center">{msg.timestamp}
+                              {isMe && <span aria-label={msg.isRead ? 'Read' : msg.deliveredAt ? 'Delivered' : 'Sent'} title={msg.isRead ? 'Read' : msg.deliveredAt ? 'Delivered' : 'Sent'} className={msg.isRead ? 'text-blue-500' : ''}>{msg.isRead || msg.deliveredAt ? '✓✓' : '✓'}</span>}
+                            </span>
                           </div>
                         );
                       })
@@ -1348,11 +1394,14 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
                     <div ref={messagesEndRef} />
                   </div>
 
+                  {chatPhotoPreview && <div className="shrink-0 flex items-center gap-2 px-3 py-2 bg-white dark:bg-[#131b2e]"><img src={chatPhotoPreview} alt="Photo ready to send" className="h-12 w-12 rounded-lg object-cover" /><span className="text-xs truncate flex-1">{chatPhoto?.name}</span><button type="button" aria-label="Remove photo" onClick={() => setChatPhoto(null)}>×</button></div>}
                   {/* Message Input Box */}
                   <form
                     onSubmit={handleSendMessage}
                     className="p-2.5 sm:p-3 bg-white dark:bg-[#131b2e] border-t border-slate-200 dark:border-slate-800 flex items-center gap-2 shrink-0"
                   >
+                    <input ref={photoInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" aria-label="Choose chat photo" onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (!file) return; if (file.size > 5 * 1024 * 1024 || !['image/jpeg','image/png','image/webp'].includes(file.type)) { showToast('Choose a JPG, PNG, or WebP photo under 5 MB.'); return; } setChatPhoto(file); }} />
+                    <button type="button" aria-label="Attach photo" disabled={sendingChat} onClick={() => photoInputRef.current?.click()} className="p-2 text-purple-600 shrink-0"><span className="material-symbols-outlined text-[20px]">attach_file</span></button>
                     <input
                       type="text"
                       value={chatMessageText}
@@ -1364,7 +1413,7 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
                     <button
                       type="submit"
                       aria-label="Send message"
-                      disabled={!chatMessageText.trim()}
+                      disabled={sendingChat || (!chatMessageText.trim() && !chatPhoto)}
                       className="p-2 sm:p-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 text-white disabled:opacity-40 hover:from-purple-500 hover:to-indigo-500 transition-all cursor-pointer shrink-0 shadow-xs"
                     >
                       <span className="material-symbols-outlined text-[18px]">send</span>
@@ -2159,7 +2208,7 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
       {/* ========================================================================= */}
       {/* BOTTOM NAVIGATION ONLY: Home | Chat | Profile */}
       {/* ========================================================================= */}
-      <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-[#0f172a]/95 backdrop-blur-lg border-t border-slate-200 dark:border-slate-800 py-2.5 px-6 shadow-2xl">
+      <nav ref={bottomNavRef} style={{ bottom: activeTab === 'chat' ? chatBounds.keyboardInset : 0, paddingBottom: 'calc(0.625rem + env(safe-area-inset-bottom, 0px))' }} className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-[#0f172a]/95 backdrop-blur-lg border-t border-slate-200 dark:border-slate-800 py-2.5 px-6 shadow-2xl">
         <div className="max-w-md mx-auto flex items-center justify-around">
           {/* Home Tab */}
           <button
