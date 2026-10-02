@@ -742,7 +742,7 @@ export const NebulaAIChat: React.FC<NebulaAIChatProps> = ({ user, onNavigate }) 
   );
 
   return (
-    <main className="pt-16 sm:pt-20 pb-16 md:pb-0 h-[100dvh] w-full flex overflow-hidden bg-slate-50 dark:bg-[#171717] text-slate-900 dark:text-slate-100 select-text">
+    <main className="pt-16 pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-0 h-[100dvh] w-full flex overflow-hidden bg-slate-50 dark:bg-[#171717] text-slate-900 dark:text-slate-100 select-text">
       {/* 1. Left Sidebar: ChatGPT Style Previous Chats, Folders & New Chat Button */}
       <ChatSidebar
         isOpen={isSidebarOpen}
@@ -762,7 +762,7 @@ export const NebulaAIChat: React.FC<NebulaAIChatProps> = ({ user, onNavigate }) 
       />
 
       {/* 2. Main Chat Area */}
-      <div className="flex-1 flex flex-col h-full min-w-0 bg-white dark:bg-[#212121] relative overflow-hidden">
+      <div className="flex-1 flex flex-col h-full min-h-0 min-w-0 bg-white dark:bg-[#212121] relative overflow-hidden">
         {/* Top Minimal Navigation Bar (ChatGPT Style) */}
         <header className="h-12 sm:h-14 px-3 sm:px-4 border-b border-slate-200/80 dark:border-[#2f2f2f] flex items-center justify-between gap-2 shrink-0 bg-white/95 dark:bg-[#212121]/95 backdrop-blur-md z-10">
           {/* Left: Sidebar Toggle & Model Pill */}
@@ -874,7 +874,7 @@ export const NebulaAIChat: React.FC<NebulaAIChatProps> = ({ user, onNavigate }) 
         </header>
 
         {/* 3. Central Chat Message Stream */}
-        <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 space-y-6 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-2.5 sm:px-6 py-3 sm:py-4 space-y-5 sm:space-y-6 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700">
           <div className="max-w-3xl md:max-w-4xl mx-auto w-full space-y-6">
             {/* Empty State / Welcome Screen when no messages */}
             {messages.length === 0 ? (
