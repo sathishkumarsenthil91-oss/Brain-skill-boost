@@ -6,6 +6,7 @@ import { BottomNav } from './components/BottomNav';
 import { AuthView } from './components/AuthView';
 import { LandingHero } from './components/LandingHero';
 import { DashboardView } from './components/DashboardView';
+import { AnimatedNebulaLogo } from './components/AnimatedNebulaLogo';
 import { supabase } from './supabaseClient';
 import { supabaseService } from './services/supabaseService';
 
@@ -592,10 +593,15 @@ export default function App() {
           {/* Floating Copilot Button */}
           <button
             onClick={() => setIsCopilotOpen(true)}
-            className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white p-3.5 rounded-full shadow-2xl hover:scale-110 transition-transform cursor-pointer flex items-center justify-center border-2 border-white dark:border-slate-800"
-            title="Open AI Job Copilot & Resume ATS Scanner"
+            className="group relative w-14 h-14 sm:w-16 sm:h-16 rounded-full cursor-pointer flex items-center justify-center transition-transform duration-300 hover:scale-110 active:scale-95"
+            title="Open Nebula AI Job Copilot & Resume ATS Scanner"
+            aria-label="Open Nebula AI Job Copilot"
           >
-            <span className="material-symbols-outlined text-[22px]">auto_fix_high</span>
+            <span className="absolute -inset-2 rounded-full bg-gradient-to-r from-cyan-400 via-blue-500 to-fuchsia-500 blur-xl opacity-80 group-hover:opacity-100 animate-pulse pointer-events-none" />
+            <span className="absolute -inset-0.5 rounded-full border-[3px] border-cyan-300/90 shadow-[0_0_16px_rgba(34,211,238,0.95),0_0_32px_rgba(99,102,241,0.85),0_0_48px_rgba(217,70,239,0.65)] pointer-events-none" />
+            <span className="relative z-10 rounded-full bg-[#03070d] p-1 shadow-[0_0_18px_rgba(59,130,246,0.9)]">
+              <AnimatedNebulaLogo size={46} intensity="normal" />
+            </span>
           </button>
         </div>
       )}
