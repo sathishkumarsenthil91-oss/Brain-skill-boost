@@ -599,8 +599,8 @@ export default function App() {
           >
             <span className="absolute -inset-2 rounded-full bg-gradient-to-r from-cyan-400 via-blue-500 to-fuchsia-500 blur-xl opacity-80 group-hover:opacity-100 animate-pulse pointer-events-none" />
             <span className="absolute -inset-0.5 rounded-full border-[3px] border-cyan-300/90 shadow-[0_0_16px_rgba(34,211,238,0.95),0_0_32px_rgba(99,102,241,0.85),0_0_48px_rgba(217,70,239,0.65)] pointer-events-none" />
-            <span className="relative z-10 rounded-full bg-[#03070d] p-1 shadow-[0_0_18px_rgba(59,130,246,0.9)]">
-              <AnimatedNebulaLogo size={46} intensity="normal" />
+            <span className="relative z-10 w-12 h-12 sm:w-14 sm:h-14 rounded-full overflow-hidden bg-[#03070d] flex items-center justify-center shadow-[0_0_18px_rgba(59,130,246,0.9)]">
+              <AnimatedNebulaLogo size="100%" intensity="normal" />
             </span>
           </button>
         </div>
