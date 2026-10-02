@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { supabase } from '../supabaseClient';
 import { apiFetch } from '../services/api';
 import { ViewType, UserProfile, ChatMessage } from '../types';
-import { NEBULA_LOGO_URL } from '../data/mockData';
+import { AnimatedNebulaLogo } from './AnimatedNebulaLogo';
 import { ChatSessionMeta, ChatFolder, DEFAULT_CHAT_FOLDERS } from './chat/chatTypes';
 import { ChatSidebar } from './chat/ChatSidebar';
 import { ChatMessageItem } from './chat/ChatMessageItem';
@@ -903,12 +903,7 @@ export const NebulaAIChat: React.FC<NebulaAIChatProps> = ({ user, onNavigate }) 
               <div className="flex items-start gap-3 sm:gap-4 w-full animate-in fade-in">
                 <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full p-0.5 bg-gradient-to-tr from-blue-500 to-indigo-600 shadow-xs shrink-0 mt-0.5">
                   <div className="w-full h-full rounded-full overflow-hidden bg-slate-900 border border-white/20 flex items-center justify-center">
-                    <img
-                      src={NEBULA_LOGO_URL}
-                      alt="Nebula AI"
-                      className="w-full h-full object-cover rounded-full"
-                      referrerPolicy="no-referrer"
-                    />
+                    <AnimatedNebulaLogo size="100%" intensity="soft" />
                   </div>
                 </div>
                 <div className="flex-1 min-w-0 space-y-2">
