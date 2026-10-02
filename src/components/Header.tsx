@@ -59,9 +59,9 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <header className="fixed top-0 w-full z-50 bg-white/95 dark:bg-[#0f172a]/95 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800 shadow-xs transition-colors duration-200">
-      <div className="flex justify-between items-center gap-1.5 px-2.5 min-[390px]:px-4 sm:px-6 h-16 w-full max-w-7xl mx-auto">
+      <div className="flex justify-between items-center gap-1.5 sm:gap-4 px-2.5 min-[390px]:px-4 sm:px-6 h-16 w-full max-w-[1800px] mx-auto">
         {/* Brand Logo & Name with Unique Animation */}
-        <div className="flex items-center gap-1.5 min-[390px]:gap-3 min-w-0">
+        <div className="flex items-center gap-1.5 min-[390px]:gap-3 min-w-0 shrink-0">
           <BrainboostLogo
             size={34}
             showText={true}
@@ -70,7 +70,7 @@ export const Header: React.FC<HeaderProps> = ({
           />
 
           {/* Mega Menu / All 14 Sections Launcher */}
-          <div className="relative" ref={menuRef}>
+          <div className="relative shrink-0" ref={menuRef}>
             <button
               onClick={() => setIsMenuOpen(!isMenuOpen)}
               className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition-colors cursor-pointer"
@@ -167,7 +167,7 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Primary Desktop Nav Links */}
-        <nav className="hidden lg:flex gap-5 xl:gap-6 items-center text-xs font-semibold">
+        <nav className="hidden min-[1800px]:flex gap-4 items-center text-xs font-semibold shrink-0 whitespace-nowrap">
           <button
             onClick={() => onNavigate('dashboard')}
             className={`transition-colors cursor-pointer ${
@@ -290,7 +290,7 @@ export const Header: React.FC<HeaderProps> = ({
                 className="w-full h-full object-cover"
               />
             </div>
-            <span className="hidden xl:inline-block text-xs font-bold text-slate-700 dark:text-slate-200">
+            <span className="hidden min-[1800px]:inline-block max-w-28 truncate text-xs font-bold text-slate-700 dark:text-slate-200">
               {user.name}
             </span>
           </div>
