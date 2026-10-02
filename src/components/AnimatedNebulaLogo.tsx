@@ -24,7 +24,7 @@ export const AnimatedNebulaLogo: React.FC<AnimatedNebulaLogoProps> = ({
   return (
     <span
       className={`nebula-live-logo inline-flex items-center justify-center shrink-0 ${className}`}
-      style={{ width: size, height: size, boxShadow: outerGlow, borderRadius: '32%' }}
+      style={{ width: size, height: size, borderRadius: '50%', overflow: 'hidden', boxShadow: outerGlow, background: '#06090f' }}
       role="img"
       aria-label={title}
       title={title}
@@ -78,8 +78,8 @@ export const AnimatedNebulaLogo: React.FC<AnimatedNebulaLogoProps> = ({
       `}</style>
 
       <svg
-        className="nebula-svg"
-        viewBox="0 0 120 104"
+        className="nebula-svg" style={{ display: 'block', width: '100%', height: '100%', borderRadius: '50%' }}
+        viewBox="0 0 120 120"
         width="100%"
         height="100%"
         aria-hidden="true"
