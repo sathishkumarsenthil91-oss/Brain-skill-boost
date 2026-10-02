@@ -715,6 +715,8 @@ export const connectivityService = {
 
       if (error || !Array.isArray(profiles)) return [];
 
+      const verificationByUser = await fetchVerificationEvidence(profiles.map((profile: any) => profile.id));
+
       let allFollows: { follower_id: string; following_id: string }[] = [];
       const { data: afData } = await existingSupabaseClient
         .from('network_follows')
@@ -727,6 +729,7 @@ export const connectivityService = {
         const isFollower = myUid ? allFollows.some((f) => f.follower_id === p.id && f.following_id === myUid) : false;
         const followersCount = allFollows.filter((f) => f.following_id === p.id).length;
         const followingCount = allFollows.filter((f) => f.follower_id === p.id).length;
+        const evidence = verificationByUser.get(p.id);
         return {
           ...mapped,
           isFollowing,
@@ -734,6 +737,9 @@ export const connectivityService = {
           isFriend: Boolean(isFollowing && isFollower),
           followersCount,
           followingCount,
+          certificates: evidence?.certificates || [],
+          isVerified: evidence?.verification.isVerified || false,
+          verification: evidence?.verification || emptyNetworkVerification(),
         };
       });
     } catch (err) {
@@ -774,6 +780,8 @@ export const connectivityService = {
 
       if (error || !Array.isArray(profiles)) return [];
 
+      const verificationByUser = await fetchVerificationEvidence(profiles.map((profile: any) => profile.id));
+
       let allFollows: { follower_id: string; following_id: string }[] = [];
       const { data: afData } = await existingSupabaseClient
         .from('network_follows')
@@ -786,6 +794,7 @@ export const connectivityService = {
         const isFollower = myUid ? allFollows.some((f) => f.follower_id === p.id && f.following_id === myUid) : false;
         const followersCount = allFollows.filter((f) => f.following_id === p.id).length;
         const followingCount = allFollows.filter((f) => f.follower_id === p.id).length;
+        const evidence = verificationByUser.get(p.id);
         return {
           ...mapped,
           isFollowing,
@@ -793,6 +802,9 @@ export const connectivityService = {
           isFriend: Boolean(isFollowing && isFollower),
           followersCount,
           followingCount,
+          certificates: evidence?.certificates || [],
+          isVerified: evidence?.verification.isVerified || false,
+          verification: evidence?.verification || emptyNetworkVerification(),
         };
       });
     } catch (err) {
