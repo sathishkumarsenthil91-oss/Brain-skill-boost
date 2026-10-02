@@ -229,9 +229,11 @@ export const FollowersFollowingModal: React.FC<FollowersFollowingModalProps> = (
                       <p className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white hover:text-purple-600 transition-colors truncate">
                         {item.name}
                       </p>
-                      <span className="material-symbols-outlined text-blue-500 text-[14px]">
-                        verified
-                      </span>
+                      {item.isVerified && (
+                        <span className="material-symbols-outlined text-blue-500 text-[14px]" title="Verified Member">
+                          verified
+                        </span>
+                      )}
                     </div>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
                       {item.userId || `@${item.username || 'member'}`} • {item.company}
