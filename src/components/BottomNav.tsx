@@ -23,14 +23,14 @@ export const BottomNav: React.FC<BottomNavProps> = ({ currentView, onNavigate })
   ];
 
   return (
-    <nav className="fixed bottom-0 left-0 w-full flex justify-around items-center px-2 py-1.5 bg-white/95 dark:bg-[#0f172a]/95 backdrop-blur-md border-t border-slate-200/80 dark:border-slate-800 rounded-t-2xl z-50 md:hidden pb-[max(0.625rem,env(safe-area-inset-bottom))] transition-colors duration-200 shadow-lg">
+    <nav className="fixed bottom-0 left-0 w-full grid grid-cols-6 items-stretch gap-0 px-1 pt-1.5 bg-white/95 dark:bg-[#0f172a]/95 backdrop-blur-md border-t border-slate-200/80 dark:border-slate-800 rounded-t-2xl z-50 md:hidden pb-[max(0.5rem,env(safe-area-inset-bottom))] transition-colors duration-200 shadow-lg">
       {navButtons.map((btn) => {
         const isActive = currentView === btn.id;
         return (
           <button
             key={btn.id}
             onClick={() => onNavigate(btn.id)}
-            className={`flex flex-col items-center justify-center py-1 px-2.5 rounded-xl transition-all cursor-pointer ${
+            className={`min-w-0 flex flex-col items-center justify-center py-1 px-0.5 rounded-xl transition-all cursor-pointer ${
               isActive
                 ? 'bg-blue-600 text-white shadow-xs scale-95'
                 : 'text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400'
@@ -43,7 +43,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ currentView, onNavigate })
                 {btn.icon}
               </span>
             )}
-            <span className="text-[10px] font-bold mt-0.5">{btn.label}</span>
+            <span className="w-full truncate text-center text-[9px] min-[390px]:text-[10px] font-bold mt-0.5 leading-tight">{btn.label}</span>
           </button>
         );
       })}
