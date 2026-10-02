@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { ViewType, UserProfile } from '../types';
 import { NEBULA_LOGO_URL } from '../data/mockData';
 import { BrainboostLogo } from './BrainboostLogo';
+import { AnimatedNebulaLogo } from './AnimatedNebulaLogo';
 
 interface HeaderProps {
   currentView: ViewType;
@@ -130,9 +131,13 @@ export const Header: React.FC<HeaderProps> = ({
                               : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
                           }`}
                         >
-                          <span className="material-symbols-outlined text-[18px]">
-                            {sec.icon}
-                          </span>
+                          {sec.id === 'nebula' ? (
+                            <AnimatedNebulaLogo size={21} intensity="soft" />
+                          ) : (
+                            <span className="material-symbols-outlined text-[18px]">
+                              {sec.icon}
+                            </span>
+                          )}
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1.5">
@@ -244,7 +249,7 @@ export const Header: React.FC<HeaderProps> = ({
                 : 'text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400'
             }`}
           >
-            <span className="material-symbols-outlined text-[16px]">smart_toy</span>
+            <AnimatedNebulaLogo size={18} intensity="soft" />
             AI Chatbot
           </button>
         </nav>
