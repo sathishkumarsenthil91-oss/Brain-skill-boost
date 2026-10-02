@@ -1,0 +1,9 @@
+# Repair verification — 2 October 2026
+
+Fixed authenticated profile ownership and missing Connectivity skills/interests fields. Removed repeated profile writes during directory loads. Live chat uses persisted private database messages and filtered realtime subscriptions; posts, likes, comments, and library requests use the actual database schema. AI calls use authenticated edge functions directly, correct API models, bounded timeouts, and actionable errors. Failed provider calls no longer create unanswered history entries. Assignment submission no longer invents grades or repository reviews.
+
+Validation: TypeScript check and production build passed; edge function type check passed. Two isolated signed-in accounts passed profile save/reload, realtime message delivery/reload, posts/code/likes/comments persistence, library request/approval, 16 screen navigation checks without runtime errors, and mobile AI chat layout. Hosted API authentication/CORS smoke checks passed.
+
+Limits: AI provider still reported credit_balance_exhausted on the latest authenticated test; a successful AI reply remains unverified. Courses, opportunities, certifications, webinars, assignments, industry tools, and roadmap catalog tables were empty; their complete workflows remain unverified and sample content is displayed. Some progress controls still only update local state. Production build reports a large initial JavaScript chunk. Frontend changes require deployment; backend profile migration and AI/app edge-function fixes have been applied to the connected project.
+
+Run browser regression with two disposable accounts: set TEST_EMAIL_A, TEST_EMAIL_B, TEST_PASSWORD, then npm run dev and npm run test:repair. The test requires the local Vite server and performs writes only for those accounts. Never use real customer accounts. Chrome must be installed.

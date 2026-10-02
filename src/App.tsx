@@ -307,6 +307,8 @@ export default function App() {
           username: dbProfile.username,
           userId: dbProfile.user_id_handle,
           connectivitySetupCompleted: dbProfile.connectivity_setup_completed,
+          skills: dbProfile.skills || [], interests: dbProfile.interests || [],
+          isPrivateAccount: dbProfile.is_private_account,
           name: dbProfile.name || nextUser.name,
           avatarUrl: dbProfile.avatar_url || nextUser.avatarUrl,
           college: dbProfile.college || nextUser.college,

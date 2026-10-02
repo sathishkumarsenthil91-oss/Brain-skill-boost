@@ -150,18 +150,18 @@ export const IndustryToolsView: React.FC<IndustryToolsViewProps> = ({ onNavigate
               <div className="space-y-1 pt-1">
                 <div className="flex justify-between text-[11px] font-semibold text-slate-500 dark:text-slate-400">
                   <span>Proficiency</span>
-                  <span className="font-bold text-slate-800 dark:text-slate-200">{tool.proficiency}%</span>
+                  <span className="font-bold text-slate-800 dark:text-slate-200">{(tool.proficiency ?? 0)}%</span>
                 </div>
                 <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
                   <div
                     className={`h-full rounded-full transition-all duration-300 ${
-                      tool.proficiency >= 80
+                      (tool.proficiency ?? 0) >= 80
                         ? 'bg-emerald-500'
-                        : tool.proficiency >= 40
+                        : (tool.proficiency ?? 0) >= 40
                         ? 'bg-blue-500'
                         : 'bg-slate-400'
                     }`}
-                    style={{ width: `${tool.proficiency}%` }}
+                    style={{ width: `${(tool.proficiency ?? 0)}%` }}
                   />
                 </div>
               </div>
@@ -215,7 +215,7 @@ export const IndustryToolsView: React.FC<IndustryToolsViewProps> = ({ onNavigate
                 Essential terminal commands and production snippets for {selectedTool.name}:
               </p>
               <div className="space-y-2">
-                {selectedTool.cheatSheetSnippet?.map((snippet, idx) => (
+                {[selectedTool.quickTip].filter(Boolean).map((snippet, idx) => (
                   <div key={idx} className="bg-slate-950 text-emerald-400 p-3 rounded-xl font-mono text-xs overflow-x-auto">
                     $ {snippet}
                   </div>

@@ -38,15 +38,15 @@ export const CertificationsView: React.FC<CertificationsViewProps> = ({ onNaviga
       prev.map((c) => {
         if (c.id === certId) {
           const nextStatus =
-            c.status === 'Completed'
+            c.status === 'Earned'
               ? 'In Progress'
               : c.status === 'In Progress'
               ? 'Planned'
-              : 'Completed';
+              : 'Earned';
           return {
             ...c,
             status: nextStatus,
-            examScore: nextStatus === 'Completed' ? 'Passed (910/1000)' : undefined,
+            
           };
         }
         return c;
@@ -77,7 +77,7 @@ export const CertificationsView: React.FC<CertificationsViewProps> = ({ onNaviga
           <div className="flex items-center gap-4 bg-white/10 backdrop-blur-xs p-4 rounded-2xl border border-white/10">
             <div className="text-center px-2">
               <span className="text-2xl font-black text-amber-300">
-                {certifications.filter((c) => c.status === 'Completed').length}
+                {certifications.filter((c) => c.status === 'Earned').length}
               </span>
               <span className="text-[11px] block text-slate-300 font-semibold">Earned</span>
             </div>
@@ -120,14 +120,14 @@ export const CertificationsView: React.FC<CertificationsViewProps> = ({ onNaviga
               <div className="flex items-start justify-between gap-4">
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-12 rounded-2xl bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-900/60 flex items-center justify-center text-2xl shrink-0">
-                    {cert.badgeIcon || '📜'}
+                    {'📜'}
                   </div>
                   <div>
                     <span className="text-[10px] font-extrabold uppercase text-blue-600 dark:text-blue-400">
                       {cert.issuer}
                     </span>
                     <h3 className="text-base font-bold text-slate-900 dark:text-white leading-snug">
-                      {cert.name}
+                      {cert.title}
                     </h3>
                   </div>
                 </div>
@@ -135,7 +135,7 @@ export const CertificationsView: React.FC<CertificationsViewProps> = ({ onNaviga
                 <span
                   onClick={() => handleToggleStatus(cert.id)}
                   className={`px-3 py-1 rounded-full text-xs font-extrabold cursor-pointer transition-all hover:scale-105 shrink-0 ${
-                    cert.status === 'Completed'
+                    cert.status === 'Earned'
                       ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800'
                       : cert.status === 'In Progress'
                       ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border border-blue-300 dark:border-blue-800'
@@ -143,23 +143,23 @@ export const CertificationsView: React.FC<CertificationsViewProps> = ({ onNaviga
                   }`}
                   title="Click to toggle status"
                 >
-                  {cert.status === 'Completed' ? '✓ Earned' : cert.status}
+                  {cert.status === 'Earned' ? '✓ Earned' : cert.status}
                 </span>
               </div>
 
               <div className="grid grid-cols-2 gap-2 text-xs bg-slate-50 dark:bg-slate-800/50 p-3 rounded-2xl border border-slate-100 dark:border-slate-800">
                 <div>
                   <span className="text-slate-400 font-semibold block text-[10px] uppercase">Level</span>
-                  <span className="font-bold text-slate-800 dark:text-slate-200">{cert.level}</span>
+                  <span className="font-bold text-slate-800 dark:text-slate-200">{cert.difficulty}</span>
                 </div>
                 <div>
                   <span className="text-slate-400 font-semibold block text-[10px] uppercase">Market Value</span>
                   <span className="font-bold text-emerald-600 dark:text-emerald-400">{cert.marketValue}</span>
                 </div>
-                {cert.validUntil && (
+                {cert.targetDate && (
                   <div>
-                    <span className="text-slate-400 font-semibold block text-[10px] uppercase">Valid Until</span>
-                    <span className="font-medium text-slate-700 dark:text-slate-300">{cert.validUntil}</span>
+                    <span className="text-slate-400 font-semibold block text-[10px] uppercase">Target Date</span>
+                    <span className="font-medium text-slate-700 dark:text-slate-300">{cert.targetDate}</span>
                   </div>
                 )}
                 {cert.examScore && (

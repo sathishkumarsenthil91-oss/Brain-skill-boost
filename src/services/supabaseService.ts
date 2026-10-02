@@ -1,5 +1,5 @@
 import { SupabaseClient } from '@supabase/supabase-js';
-import { supabase as existingSupabaseClient } from '../supabaseClient';
+import { supabase as existingSupabaseClient, reportServiceError } from '../supabaseClient';
 import {
   NetworkUser,
   NetworkPost,
@@ -40,6 +40,18 @@ export function getSupabaseClient(): SupabaseClient | null {
 export const isSupabaseConfigured = (): boolean => {
   return Boolean(existingSupabaseClient);
 };
+
+async function requireConnectivityUser(): Promise<string> {
+  const { data, error } = await existingSupabaseClient.auth.getSession();
+  if (error || !data.session?.user.id) throw new Error('Please sign in again to save your changes.');
+  return data.session.user.id;
+}
+
+function mapNetworkMessage(row: any): NetworkMessage {
+  return { id: row.id, senderId: row.sender_id, receiverId: row.receiver_id, content: row.content,
+    timestamp: new Date(row.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    isRead: Boolean(row.is_read) };
+}
 
 // Local storage persistent keys for backup / fast offline cache
 const getStorageKey = (baseKey: string, user?: UserProfile): string => {
@@ -182,57 +194,10 @@ export function mapProfileToNetworkUser(user: UserProfile, libraryItems?: UserLi
  */
 export async function resolveUserUuid(client: any, user?: UserProfile): Promise<string | null> {
   if (!client) return null;
-  try {
-    const { data: sessionData } = await client.auth.getSession();
-    if (sessionData?.session?.user?.id) {
-      return sessionData.session.user.id;
-    }
-  } catch {}
-
-  const email = user?.email?.trim().toLowerCase();
-  if (!email) return null;
-
-  try {
-    const { data: profile } = await client
-      .from('profiles')
-      .select('id')
-      .eq('email', email)
-      .maybeSingle();
-
-    if (profile?.id) {
-      return profile.id;
-    }
-
-    // Auto-create profile in Supabase if it doesn't exist
-    if (user) {
-      const { data: newProfile, error } = await client
-        .from('profiles')
-        .insert({
-          email,
-          name: user.name || user.email.split('@')[0],
-          target_role: user.targetRole || 'Full Stack Engineer',
-          degree: user.degree || 'B.Tech Computer Science',
-          college: user.college || 'Tech Institute',
-          grad_year: user.gradYear || '2026',
-          avatar_url: user.avatarUrl,
-          overall_readiness: user.overallReadiness || 65,
-        })
-        .select('id')
-        .maybeSingle();
-
-      if (!error && newProfile?.id) {
-        return newProfile.id;
-      }
-    }
-  } catch (err) {
-    console.warn('resolveUserUuid error:', err);
-  }
-  return null;
+  const { data, error } = await client.auth.getSession();
+  return error ? null : data.session?.user?.id || null;
 }
 
-/**
- * Resolves any target user ID (UUID, email, or handle) to a Supabase UUID
- */
 export async function resolveTargetUuid(client: any, targetId: string): Promise<string | null> {
   if (!client || !targetId) return null;
   if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetId)) {
@@ -279,6 +244,9 @@ export const connectivityService = {
 
       const profilePayload: any = {
         email: user.email.toLowerCase().trim(),
+        username: cleanUsername, user_id_handle: '@' + cleanUsername,
+        skills: user.skills || [], interests: user.interests || [],
+        connectivity_setup_completed: Boolean(user.connectivitySetupCompleted),
         name: user.name || user.email.split('@')[0],
         avatar_url:
           user.avatarUrl ||
@@ -293,19 +261,18 @@ export const connectivityService = {
         target_role: user.targetRole || 'Full Stack Engineer',
         location: user.location || 'Remote',
         is_private_account: Boolean(user.isPrivateAccount),
+        is_library_private: Boolean(user.isPrivateAccount),
         overall_readiness: user.overallReadiness || 65,
         updated_at: new Date().toISOString(),
       };
 
-      // If user has Supabase Auth user ID
-      const { data: authSession } = await existingSupabaseClient.auth.getSession();
-      if (authSession?.session?.user?.id) {
-        profilePayload.id = authSession.session.user.id;
-      }
+      // Never fall back to an email lookup for ownership of a write.
+      profilePayload.id = await requireConnectivityUser();
 
-      const { data: upsertedProfile } = await existingSupabaseClient.from('profiles').upsert(profilePayload, {
-        onConflict: 'email',
+      const { data: upsertedProfile, error: profileError } = await existingSupabaseClient.from('profiles').upsert(profilePayload, {
+        onConflict: 'id',
       }).select('id').maybeSingle();
+      if (profileError) throw profileError;
 
       const profileId = profilePayload.id || upsertedProfile?.id;
       if (profileId) {
@@ -355,7 +322,8 @@ export const connectivityService = {
         }
       }
     } catch (err) {
-      console.warn('Supabase profile sync notice:', err);
+      reportServiceError('Your profile could not be saved. Please try again.');
+      throw err;
     }
   },
 
@@ -372,31 +340,19 @@ export const connectivityService = {
       bio?: string;
     }
   ): Promise<void> {
-    try {
-      const key = getStorageKey(BASE_STORAGE_KEYS.SETUP_DONE, user);
-      localStorage.setItem(key, 'true');
-
-      // Sync to Supabase
-      if (existingSupabaseClient && user.email) {
-        const cleanUsername = data.userId.replace(/^@/, '');
-        await existingSupabaseClient.from('profiles').upsert(
-          {
-            email: user.email.toLowerCase().trim(),
-            name: data.name,
-            avatar_url: data.avatarUrl,
-            headline: data.headline || user.headline,
-            bio: data.bio || user.bio,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: 'email' }
-        );
-      }
-    } catch (e) {
-      console.error('Error completing connectivity setup:', e);
-    }
+    const uid = await requireConnectivityUser();
+    const username = data.userId.replace(/^@/, '');
+    const { error } = await existingSupabaseClient.from('profiles').upsert({
+      id: uid, email: user.email.toLowerCase().trim(), username,
+      user_id_handle: '@' + username, name: data.name, avatar_url: data.avatarUrl,
+      headline: data.headline || '', bio: data.bio || '', skills: data.skills,
+      interests: data.interests, connectivity_setup_completed: true,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'id' });
+    if (error) throw error;
+    try { localStorage.setItem(getStorageKey(BASE_STORAGE_KEYS.SETUP_DONE, user), 'true'); } catch {}
   },
 
-  // Search across ALL Supabase registered users in real time
   async searchUsers(query: string, currentUser: UserProfile): Promise<NetworkUser[]> {
     const cleanQuery = query.trim().replace(/^@/, '');
 
@@ -485,8 +441,6 @@ export const connectivityService = {
 
     if (existingSupabaseClient) {
       try {
-        // Sync self first
-        await this.syncUserProfileToSupabase(currentUser);
         const myUid = await resolveUserUuid(existingSupabaseClient, currentUser);
 
         const { data, error } = await existingSupabaseClient
@@ -714,11 +668,11 @@ export const connectivityService = {
       try {
         const { data, error } = await existingSupabaseClient
           .from('network_posts')
-          .select('*, author:profiles(*)')
+          .select('*, author:profiles(*), likes:network_post_likes(user_id), comments:network_post_comments(*,author:profiles(*)), certificate:generated_certificates(*)')
           .order('created_at', { ascending: false })
           .limit(30);
 
-        if (!error && Array.isArray(data) && data.length > 0) {
+        if (!error && Array.isArray(data)) {
           const currentMapped = mapProfileToNetworkUser(currentUser);
           const mappedPosts: NetworkPost[] = data.map((p: any) => ({
             id: p.id,
@@ -742,13 +696,20 @@ export const connectivityService = {
             tags: p.tags || ['#SoftwareEngineering'],
             skills: p.skills || ['WebDev'],
             likesCount: Number(p.likes_count || 0),
-            isLiked: false,
+            isLiked: (p.likes || []).some((like: any) => like.user_id === currentMapped.id),
             commentsCount: Number(p.comments_count || 0),
             repostsCount: Number(p.reposts_count || 0),
             imageUrl: p.image_url,
             codeSnippet: p.code_snippet,
             poll: p.poll,
-            comments: [],
+            attachedCertificate: p.certificate ? { ...p.certificate, serialId: p.certificate.serial_id,
+              title: p.certificate.title, skillsValidated: p.certificate.skills_validated || [],
+              organization: p.certificate.organization, issueDate: p.certificate.issue_date,
+              recipientName: p.certificate.recipient_name, type: p.certificate.type } : undefined,
+            comments: (p.comments || []).map((c: any) => ({ id: c.id, authorId: c.author_id,
+              authorName: c.author?.name || 'Member', authorAvatar: c.author?.avatar_url || '',
+              authorHeadline: c.author?.headline || '', content: c.content,
+              timestamp: new Date(c.created_at).toLocaleString(), likesCount: c.likes_count || 0, isLiked: false })),
           }));
 
           this.saveLocalPosts(mappedPosts, currentUser);
@@ -829,7 +790,7 @@ export const connectivityService = {
 
     if (existingSupabaseClient) {
       try {
-        const authorUuid = (await resolveUserUuid(existingSupabaseClient, currentUser));
+        const authorUuid = await requireConnectivityUser();
         if (authorUuid) {
           const { data, error } = await existingSupabaseClient
             .from('network_posts')
@@ -837,6 +798,8 @@ export const connectivityService = {
               author_id: authorUuid,
               content: payload.content,
               image_url: payload.imageUrl,
+              code_snippet: payload.codeSnippet,
+              attached_certificate_id: payload.attachedCertificate?.id,
               tags: payload.tags || ['#Brainboost'],
               skills: newPost.skills,
             })
@@ -846,11 +809,11 @@ export const connectivityService = {
           if (!error && data) {
             newPost.id = data.id;
           } else if (error) {
-            console.warn('network_posts insert warning:', error);
+            throw error;
           }
         }
       } catch (err) {
-        console.warn('Supabase createPost insert notice:', err);
+        throw err;
       }
     }
 
@@ -861,75 +824,26 @@ export const connectivityService = {
   },
 
   // Like & Comment handlers
-  toggleLike(postId: string, currentUser: UserProfile): NetworkPost[] {
-    const posts = this.getPosts(currentUser);
-    let targetPost: NetworkPost | undefined;
-    const updated = posts.map((p) => {
-      if (p.id === postId) {
-        const isLiked = !p.isLiked;
-        targetPost = {
-          ...p,
-          isLiked,
-          likesCount: isLiked ? p.likesCount + 1 : Math.max(0, p.likesCount - 1),
-        };
-        return targetPost;
-      }
-      return p;
-    });
-    this.saveLocalPosts(updated, currentUser);
-
-    if (existingSupabaseClient) {
-      resolveUserUuid(existingSupabaseClient, currentUser).then((uid) => {
-        if (!uid) return;
-        if (targetPost?.isLiked) {
-          existingSupabaseClient.from('post_likes').upsert({ post_id: postId, user_id: uid }, { onConflict: 'user_id, post_id' }).then(() => {});
-        } else {
-          existingSupabaseClient.from('post_likes').delete().eq('post_id', postId).eq('user_id', uid).then(() => {});
-        }
-      }).catch((err) => console.warn('Supabase toggleLike notice:', err));
-    }
-
-    return updated;
+  async toggleLike(postId: string, currentUser: UserProfile): Promise<NetworkPost[]> {
+    const uid = await requireConnectivityUser();
+    const { data: like, error: readError } = await existingSupabaseClient.from('network_post_likes')
+      .select('id').eq('post_id', postId).eq('user_id', uid).maybeSingle();
+    if (readError) throw readError;
+    const { error } = like
+      ? await existingSupabaseClient.from('network_post_likes').delete().eq('id', like.id)
+      : await existingSupabaseClient.from('network_post_likes').insert({ post_id: postId, user_id: uid });
+    if (error) throw error;
+    return this.fetchPosts(currentUser);
   },
 
-  addComment(postId: string, content: string, currentUser: UserProfile): NetworkPost[] {
-    const currentMapped = mapProfileToNetworkUser(currentUser);
-    const posts = this.getPosts(currentUser);
-    const updated = posts.map((p) => {
-      if (p.id === postId) {
-        const newComment = {
-          id: `c-${Date.now()}`,
-          authorId: currentMapped.id,
-          authorName: currentMapped.name,
-          authorAvatar: currentMapped.avatarUrl,
-          authorHeadline: currentMapped.headline,
-          timestamp: 'Just now',
-          content,
-          likesCount: 0,
-          isLiked: false,
-        };
-        return {
-          ...p,
-          commentsCount: p.commentsCount + 1,
-          comments: [...p.comments, newComment],
-        };
-      }
-      return p;
+  async addComment(postId: string, content: string, currentUser: UserProfile): Promise<NetworkPost[]> {
+    const uid = await requireConnectivityUser();
+    if (!content.trim()) throw new Error('Comment cannot be empty.');
+    const { error } = await existingSupabaseClient.from('network_post_comments').insert({
+      post_id: postId, author_id: uid, content: content.trim(),
     });
-    this.saveLocalPosts(updated, currentUser);
-
-    if (existingSupabaseClient) {
-      resolveUserUuid(existingSupabaseClient, currentUser).then((uid) => {
-        if (!uid) return;
-        existingSupabaseClient.from('post_comments').insert({
-          post_id: postId,
-          author_id: uid,
-          content,
-        }).then(() => {});
-      }).catch((err) => console.warn('Supabase addComment notice:', err));
-    }
-
-    return updated;
+    if (error) throw error;
+    return this.fetchPosts(currentUser);
   },
 
   // ============================================================================
@@ -951,7 +865,35 @@ export const connectivityService = {
   },
 
   async fetchConversations(currentUser: UserProfile): Promise<NetworkConversation[]> {
-    return this.getConversations(currentUser);
+    const uid = await requireConnectivityUser();
+    const { data, error } = await existingSupabaseClient.from('network_messages')
+      .select('*').or(`sender_id.eq.${uid},receiver_id.eq.${uid}`)
+      .order('created_at', { ascending: false }).limit(500);
+    if (error) throw error;
+    const rows = (data || []).reverse();
+    const peerIds = [...new Set(rows.map(row => row.sender_id === uid ? row.receiver_id : row.sender_id))];
+    if (!peerIds.length) { this.saveConversations([], currentUser); return []; }
+    const { data: profiles, error: profileError } = await existingSupabaseClient.from('profiles')
+      .select('*').in('id', peerIds);
+    if (profileError) throw profileError;
+    const peers = new Map((profiles || []).map(row => [row.id, mapRowToNetworkUser(row, uid)]));
+    const grouped = new Map<string, NetworkConversation>();
+    for (const row of rows) {
+      const peerId = row.sender_id === uid ? row.receiver_id : row.sender_id;
+      const participant = peers.get(peerId);
+      if (!participant) continue;
+      const msg = mapNetworkMessage(row);
+      const conv = grouped.get(peerId) || { id: row.conversation_id || `conv-${peerId}`,
+        participant, lastMessage: '', lastMessageTime: '', unreadCount: 0, messages: [] };
+      conv.messages.push(msg);
+      conv.lastMessage = msg.content;
+      conv.lastMessageTime = msg.timestamp;
+      if (row.receiver_id === uid && !row.is_read) conv.unreadCount++;
+      grouped.delete(peerId); grouped.set(peerId, conv);
+    }
+    const conversations = [...grouped.values()].reverse();
+    this.saveConversations(conversations, currentUser);
+    return conversations;
   },
 
   saveConversations(convs: NetworkConversation[], currentUser?: UserProfile): void {
@@ -965,496 +907,113 @@ export const connectivityService = {
 
   // Fetch remote chat messages between current user and target user from Supabase
   async fetchMessagesForUser(participantId: string, currentUser: UserProfile): Promise<NetworkMessage[]> {
-    if (!existingSupabaseClient) return [];
-    try {
-      const myUid = await resolveUserUuid(existingSupabaseClient, currentUser);
-      const targetUid = (await resolveTargetUuid(existingSupabaseClient, participantId)) || participantId;
-      if (!myUid || !targetUid) return [];
-
-      let dbMessages: any[] = [];
-      const { data: nmData } = await existingSupabaseClient
-        .from('network_messages')
-        .select('*')
-        .or(`and(sender_id.eq.${myUid},receiver_id.eq.${targetUid}),and(sender_id.eq.${targetUid},receiver_id.eq.${myUid})`)
-        .order('created_at', { ascending: true })
-        .limit(150);
-
-      if (Array.isArray(nmData) && nmData.length > 0) {
-        dbMessages = nmData;
-      } else {
-        const { data: mData } = await existingSupabaseClient
-          .from('messages')
-          .select('*')
-          .or(`and(sender_id.eq.${myUid},receiver_id.eq.${targetUid}),and(sender_id.eq.${targetUid},receiver_id.eq.${myUid})`)
-          .order('created_at', { ascending: true })
-          .limit(150);
-        if (Array.isArray(mData)) dbMessages = mData;
-      }
-
-      if (dbMessages.length > 0) {
-        const mapped: NetworkMessage[] = dbMessages.map((row: any) => ({
-          id: row.id || `msg-${row.created_at}`,
-          senderId: row.sender_id === myUid ? 'current-user-real' : row.sender_id,
-          receiverId: row.receiver_id,
-          content: row.content,
-          timestamp: row.created_at
-            ? new Date(row.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            : 'Recently',
-          isRead: Boolean(row.is_read),
-        }));
-
-        // Merge with local storage
-        const convs = this.getConversations(currentUser);
-        const existingConv = convs.find((c) => c.participant.id === participantId);
-        if (existingConv) {
-          existingConv.messages = mapped;
-          if (mapped.length > 0) {
-            existingConv.lastMessage = mapped[mapped.length - 1].content;
-            existingConv.lastMessageTime = mapped[mapped.length - 1].timestamp;
-          }
-        }
-        this.saveConversations(convs, currentUser);
-        return mapped;
-      }
-    } catch (err) {
-      console.warn('fetchMessagesForUser error:', err);
-    }
-    return [];
+    const uid = await requireConnectivityUser();
+    const targetUid = await resolveTargetUuid(existingSupabaseClient, participantId);
+    if (!targetUid) throw new Error('This member could not be found.');
+    const { data, error } = await existingSupabaseClient.from('network_messages').select('*')
+      .or(`and(sender_id.eq.${uid},receiver_id.eq.${targetUid}),and(sender_id.eq.${targetUid},receiver_id.eq.${uid})`)
+      .order('created_at', { ascending: false }).limit(150);
+    if (error) throw error;
+    const messages = (data || []).reverse().map(mapNetworkMessage);
+    const { error: readError } = await existingSupabaseClient.from('network_messages')
+      .update({ is_read: true }).eq('sender_id', targetUid).eq('receiver_id', uid).eq('is_read', false);
+    if (readError) console.warn('Could not mark messages as read', readError);
+    const convs = this.getConversations(currentUser).map(conv => conv.participant.id === targetUid
+      ? { ...conv, messages, unreadCount: 0 } : conv);
+    this.saveConversations(convs, currentUser);
+    return messages;
   },
 
   // Send real-time chat message with broadcast & Supabase sync
-  async sendMessage(
-    participant: NetworkUser,
-    content: string,
-    currentUser: UserProfile
-  ): Promise<{ updatedConversations: NetworkConversation[]; newMsg: NetworkMessage }> {
-    const currentMapped = mapProfileToNetworkUser(currentUser);
+  async sendMessage(participant: NetworkUser, content: string, currentUser: UserProfile)
+    : Promise<{ updatedConversations: NetworkConversation[]; newMsg: NetworkMessage }> {
+    const sender = await requireConnectivityUser();
+    const receiver = await resolveTargetUuid(existingSupabaseClient, participant.id);
+    if (!receiver || sender === receiver) throw new Error('Select another registered member to chat.');
+    if (!content.trim()) throw new Error('Message cannot be empty.');
+    const [one, two] = [sender, receiver].sort();
+    // Deterministic ordering prevents duplicate conversations when both peers send together.
+    const { data: conversation, error: convError } = await existingSupabaseClient.from('network_conversations')
+      .upsert({ participant_one_id: one, participant_two_id: two },
+        { onConflict: 'participant_one_id,participant_two_id' }).select('id').single();
+    if (convError) throw convError;
+    const { data, error } = await existingSupabaseClient.from('network_messages').insert({
+      conversation_id: conversation.id, sender_id: sender, receiver_id: receiver,
+      content: content.trim(), is_read: false,
+    }).select('*').single();
+    if (error) throw error;
+    const newMsg = mapNetworkMessage(data);
     const convs = this.getConversations(currentUser);
-    const nowIso = new Date().toISOString();
-    const formattedTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-    const newMsg: NetworkMessage = {
-      id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-      senderId: currentMapped.id,
-      receiverId: participant.id,
-      content,
-      timestamp: formattedTime,
-      isRead: true,
-    };
-
-    // 1. Send via Supabase Realtime broadcast and database table insert
-    if (existingSupabaseClient) {
-      try {
-        const senderUuid = await resolveUserUuid(existingSupabaseClient, currentUser);
-        const targetUuid = (await resolveTargetUuid(existingSupabaseClient, participant.id)) || participant.id;
-
-        const globalChannel = existingSupabaseClient.channel('public:global_realtime_chat');
-        await globalChannel.send({
-          type: 'broadcast',
-          event: 'chat_message',
-          payload: {
-            ...newMsg,
-            senderUuid,
-            targetUuid,
-            senderName: currentMapped.name,
-            senderAvatar: currentMapped.avatarUrl,
-            createdAt: nowIso,
-          },
-        });
-
-        // Insert into network_messages and messages tables
-        if (senderUuid && targetUuid) {
-          try {
-            await existingSupabaseClient.from('network_messages').insert({
-              sender_id: senderUuid,
-              receiver_id: targetUuid,
-              content,
-              is_read: false,
-              created_at: nowIso,
-            });
-          } catch (nmErr) {
-            console.warn('Insert to network_messages notice:', nmErr);
-          }
-
-          try {
-            await existingSupabaseClient.from('messages').insert({
-              sender_id: senderUuid,
-              receiver_id: targetUuid,
-              content,
-              is_read: false,
-              created_at: nowIso,
-            });
-          } catch (mErr) {
-            console.warn('Insert to messages notice:', mErr);
-          }
-        }
-      } catch (err) {
-        console.warn('Supabase Realtime message dispatch note:', err);
-      }
-    }
-
-    // 2. Update local conversation store
-    let found = false;
-    const updated = convs.map((conv) => {
-      if (conv.participant.id === participant.id) {
-        found = true;
-        return {
-          ...conv,
-          participant,
-          lastMessage: content,
-          lastMessageTime: 'Just now',
-          messages: [...conv.messages, newMsg],
-        };
-      }
-      return conv;
-    });
-
-    if (!found) {
-      updated.unshift({
-        id: `conv-${participant.id}`,
-        participant,
-        lastMessage: content,
-        lastMessageTime: 'Just now',
-        unreadCount: 0,
-        messages: [newMsg],
-      });
-    }
-
-    this.saveConversations(updated, currentUser);
-    return { updatedConversations: updated, newMsg };
+    const existing = convs.find(conv => conv.participant.id === receiver);
+    const updatedConv = { id: conversation.id, participant: { ...participant, id: receiver },
+      lastMessage: newMsg.content, lastMessageTime: newMsg.timestamp, unreadCount: 0,
+      messages: [...(existing?.messages || []).filter(msg => msg.id !== newMsg.id), newMsg] };
+    const updatedConversations = [updatedConv, ...convs.filter(conv => conv.participant.id !== receiver)];
+    this.saveConversations(updatedConversations, currentUser);
+    return { updatedConversations, newMsg };
   },
 
   // Subscribe to real-time incoming messages for current user across Broadcast and DB Postgres Changes
-  subscribeToRealtimeChat(
-    currentUser: UserProfile,
-    onIncomingMessage: (msg: NetworkMessage, participant: NetworkUser) => void
-  ): () => void {
-    if (!existingSupabaseClient) return () => {};
-
-    const currentMapped = mapProfileToNetworkUser(currentUser);
-    const seenMessageIds = new Set<string>();
-    let cachedUserUuid: string | null = null;
-    resolveUserUuid(existingSupabaseClient, currentUser).then((uid) => {
-      cachedUserUuid = uid;
-    });
-
-    const dispatchIncoming = (msg: NetworkMessage, incomingSender: NetworkUser) => {
-      if (seenMessageIds.has(msg.id)) return;
-      seenMessageIds.add(msg.id);
-      onIncomingMessage(msg, incomingSender);
-    };
-
-    // Use shared global channel for broadcast and table changes so all connected clients communicate
-    const channelName = 'public:global_realtime_chat';
-    const realtimeChannel = existingSupabaseClient
-      .channel(channelName)
-      // 1. Listen for Realtime Broadcast events
-      .on('broadcast', { event: 'chat_message' }, ({ payload }) => {
-        if (!payload) return;
-        const isForMe =
-          (cachedUserUuid && (payload.targetUuid === cachedUserUuid || payload.receiverId === cachedUserUuid)) ||
-          payload.receiverId === currentMapped.id ||
-          payload.receiverId === currentUser.id ||
-          payload.receiverId === currentUser.email ||
-          payload.targetUuid === currentMapped.id ||
-          payload.targetUuid === currentUser.id;
-
-        if (isForMe) {
-          const incomingSender: NetworkUser = {
-            id: payload.senderUuid || payload.senderId,
-            name: payload.senderName || 'Member',
-            avatarUrl:
-              payload.senderAvatar ||
-              'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80',
-            headline: 'Verified Peer',
-            company: 'Brainboost',
-            role: 'Developer',
-            location: 'Remote',
-            bio: '',
-            followersCount: 0,
-            followingCount: 0,
-            isFollowing: false,
-            isPrivate: false,
-            skills: ['Developer'],
-            certificates: [],
-            libraryItems: [],
-            projects: [],
-            internships: [],
-            achievements: [],
-            onlineStatus: 'online',
-          };
-
-          const newMsg: NetworkMessage = {
-            id: payload.id || `msg-${Date.now()}`,
-            senderId: payload.senderUuid || payload.senderId,
-            receiverId: payload.receiverId,
-            content: payload.content,
-            timestamp: payload.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            isRead: false,
-          };
-
-          dispatchIncoming(newMsg, incomingSender);
-        }
-      })
-      // 2. Listen for Postgres changes on network_messages table
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'network_messages',
-        },
-        async (payload) => {
-          const newRow = payload.new as any;
-          if (!newRow) return;
-          const isForMe =
-            (cachedUserUuid && newRow.receiver_id === cachedUserUuid) ||
-            newRow.receiver_id === currentMapped.id ||
-            newRow.receiver_id === currentUser.id;
-
-          if (isForMe) {
-            let senderName = 'Member';
-            let senderAvatar = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80';
-            let senderHeadline = 'Verified Peer';
-
-            try {
-              const { data: senderData } = await existingSupabaseClient
-                .from('profiles')
-                .select('name, avatar_url, headline, college, target_role')
-                .eq('id', newRow.sender_id)
-                .maybeSingle();
-
-              if (senderData) {
-                senderName = senderData.name || senderName;
-                senderAvatar = senderData.avatar_url || senderAvatar;
-                senderHeadline = senderData.headline || `${senderData.target_role || 'Developer'} • ${senderData.college || 'Brainboost'}`;
-              }
-            } catch {}
-
-            const incomingSender: NetworkUser = {
-              id: newRow.sender_id,
-              name: senderName,
-              avatarUrl: senderAvatar,
-              headline: senderHeadline,
-              company: 'Brainboost',
-              role: 'Developer',
-              location: 'Remote',
-              bio: '',
-              followersCount: 0,
-              followingCount: 0,
-              isFollowing: false,
-              isPrivate: false,
-              skills: ['Developer'],
-              certificates: [],
-              libraryItems: [],
-              projects: [],
-              internships: [],
-              achievements: [],
-              onlineStatus: 'online',
-            };
-
-            const newMsg: NetworkMessage = {
-              id: newRow.id || `msg-db-${Date.now()}`,
-              senderId: newRow.sender_id,
-              receiverId: newRow.receiver_id,
-              content: newRow.content,
-              timestamp: newRow.created_at
-                ? new Date(newRow.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              isRead: Boolean(newRow.is_read),
-            };
-
-            dispatchIncoming(newMsg, incomingSender);
+  subscribeToRealtimeChat(currentUser: UserProfile,
+    onIncomingMessage: (msg: NetworkMessage, participant: NetworkUser) => void): () => void {
+    let channel: any;
+    let disposed = false;
+    const seen = new Set<string>();
+    requireConnectivityUser().then(uid => {
+      if (disposed) return;
+      channel = existingSupabaseClient.channel(`network-chat-${uid}-${crypto.randomUUID()}`)
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'network_messages',
+          filter: `receiver_id=eq.${uid}` }, async ({ new: row }) => {
+          if (disposed || seen.has(row.id)) return;
+          seen.add(row.id);
+          const { data: profile } = await existingSupabaseClient.from('profiles').select('*')
+            .eq('id', row.sender_id).maybeSingle();
+          if (disposed || !profile) return;
+          const msg = mapNetworkMessage(row);
+          const participant = mapRowToNetworkUser(profile, uid);
+          const convs = this.getConversations(currentUser);
+          let conv = convs.find(c => c.participant.id === participant.id);
+          if (!conv) {
+            conv = { id: row.conversation_id || `conv-${participant.id}`, participant,
+              lastMessage: '', lastMessageTime: '', unreadCount: 0, messages: [] };
+            convs.unshift(conv);
           }
-        }
-      )
-      // 3. Listen for Postgres changes on messages table
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages',
-        },
-        async (payload) => {
-          const newRow = payload.new as any;
-          if (newRow && (newRow.receiver_id === currentMapped.id || newRow.receiver_id === currentUser.id)) {
-            let senderName = 'Member';
-            let senderAvatar = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80';
-            let senderHeadline = 'Verified Peer';
-
-            try {
-              const { data: senderData } = await existingSupabaseClient
-                .from('profiles')
-                .select('name, avatar_url, headline, college, target_role')
-                .eq('id', newRow.sender_id)
-                .maybeSingle();
-
-              if (senderData) {
-                senderName = senderData.name || senderName;
-                senderAvatar = senderData.avatar_url || senderAvatar;
-                senderHeadline = senderData.headline || `${senderData.target_role || 'Developer'} • ${senderData.college || 'Brainboost'}`;
-              }
-            } catch {}
-
-            const incomingSender: NetworkUser = {
-              id: newRow.sender_id,
-              name: senderName,
-              avatarUrl: senderAvatar,
-              headline: senderHeadline,
-              company: 'Brainboost',
-              role: 'Developer',
-              location: 'Remote',
-              bio: '',
-              followersCount: 0,
-              followingCount: 0,
-              isFollowing: false,
-              isPrivate: false,
-              skills: ['Developer'],
-              certificates: [],
-              libraryItems: [],
-              projects: [],
-              internships: [],
-              achievements: [],
-              onlineStatus: 'online',
-            };
-
-            const newMsg: NetworkMessage = {
-              id: newRow.id || `msg-db-${Date.now()}`,
-              senderId: newRow.sender_id,
-              receiverId: newRow.receiver_id,
-              content: newRow.content,
-              timestamp: newRow.created_at
-                ? new Date(newRow.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              isRead: Boolean(newRow.is_read),
-            };
-
-            dispatchIncoming(newMsg, incomingSender);
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      existingSupabaseClient.removeChannel(realtimeChannel);
-    };
+          if (!conv.messages.some(m => m.id === msg.id)) conv.messages.push(msg);
+          conv.lastMessage = msg.content; conv.lastMessageTime = msg.timestamp; conv.unreadCount++;
+          this.saveConversations(convs, currentUser);
+          onIncomingMessage(msg, participant);
+        }).subscribe(status => {
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT')
+            reportServiceError('Live chat connection interrupted. Saved messages will refresh automatically.');
+        });
+    }).catch(error => reportServiceError(error.message));
+    return () => { disposed = true; if (channel) existingSupabaseClient.removeChannel(channel); };
   },
 
   // Subscribe to live network events (follow/unfollow, live count changes)
-  subscribeToNetworkEvents(
-    currentUser: UserProfile,
-    onEvent: (event: { type: string; payload: any }) => void
-  ): () => void {
-    if (!existingSupabaseClient) return () => {};
-
-    const channelName = `network_events_global_${Date.now()}`;
-    const channel = existingSupabaseClient
-      .channel(channelName)
-      .on('broadcast', { event: 'network_event' }, ({ payload }) => {
-        if (payload) {
-          onEvent(payload);
-        }
-      })
-      .subscribe();
-
-    return () => {
-      existingSupabaseClient.removeChannel(channel);
-    };
+  subscribeToNetworkEvents(currentUser: UserProfile,
+    onEvent: (event: { type: string; payload: any }) => void): () => void {
+    const channel = existingSupabaseClient.channel(`network-events-${crypto.randomUUID()}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'network_follows' },
+        payload => onEvent({ type: 'follow_change', payload }))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'library_access_requests' },
+        payload => onEvent({ type: 'library_change', payload })).subscribe();
+    return () => { existingSupabaseClient.removeChannel(channel); };
   },
 
   // Toggle user follow / connect with direct Supabase persistence & real-time broadcast
   async toggleFollow(targetUserId: string, currentUser: UserProfile): Promise<NetworkUser[]> {
-    const users = this.getLocalUsers(currentUser);
-    let nextState = false;
-    const updated = users.map((u) => {
-      if (u.id === targetUserId) {
-        nextState = !u.isFollowing;
-        const isFriend = Boolean(nextState && u.isFollower);
-        return {
-          ...u,
-          isFollowing: nextState,
-          isFriend,
-          followersCount: nextState ? u.followersCount + 1 : Math.max(0, u.followersCount - 1),
-        };
-      }
-      return u;
-    });
-    this.saveLocalUsers(updated, currentUser);
-
-    if (existingSupabaseClient) {
-      try {
-        const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
-        const targetUid = (await resolveTargetUuid(existingSupabaseClient, targetUserId)) || targetUserId;
-
-        if (uid && targetUid) {
-          if (nextState) {
-            // Upsert into network_follows
-            try {
-              await existingSupabaseClient.from('network_follows').upsert(
-                { follower_id: uid, following_id: targetUid, status: 'approved' },
-                { onConflict: 'follower_id, following_id' }
-              );
-            } catch (nfErr) {
-              console.warn('network_follows upsert notice:', nfErr);
-            }
-            // Also upsert into user_follows
-            try {
-              await existingSupabaseClient.from('user_follows').upsert(
-                { follower_id: uid, following_id: targetUid, status: 'approved' },
-                { onConflict: 'follower_id, following_id' }
-              );
-            } catch (ufErr) {
-              console.warn('user_follows upsert notice:', ufErr);
-            }
-          } else {
-            // Delete from network_follows
-            try {
-              await existingSupabaseClient
-                .from('network_follows')
-                .delete()
-                .eq('follower_id', uid)
-                .eq('following_id', targetUid);
-            } catch (nfErr) {
-              console.warn('network_follows delete notice:', nfErr);
-            }
-            // Also delete from user_follows
-            try {
-              await existingSupabaseClient
-                .from('user_follows')
-                .delete()
-                .eq('follower_id', uid)
-                .eq('following_id', targetUid);
-            } catch (ufErr) {
-              console.warn('user_follows delete notice:', ufErr);
-            }
-          }
-
-          // Broadcast follow event to all clients
-          try {
-            const broadcastChannel = existingSupabaseClient.channel('network_events_global');
-            await broadcastChannel.send({
-              type: 'broadcast',
-              event: 'network_event',
-              payload: {
-                type: 'follow_change',
-                payload: {
-                  followerId: uid,
-                  followingId: targetUid,
-                  isFollowing: nextState,
-                },
-              },
-            });
-          } catch (bErr) {
-            console.warn('broadcast follow event notice:', bErr);
-          }
-        }
-      } catch (err) {
-        console.warn('Supabase toggleFollow notice:', err);
-      }
-    }
-
-    return updated;
+    const uid = await requireConnectivityUser();
+    const target = await resolveTargetUuid(existingSupabaseClient, targetUserId);
+    if (!target || target === uid) throw new Error('Select another registered member.');
+    const { data: existing, error: readError } = await existingSupabaseClient.from('network_follows')
+      .select('id').eq('follower_id', uid).eq('following_id', target).maybeSingle();
+    if (readError) throw readError;
+    const { error } = existing
+      ? await existingSupabaseClient.from('network_follows').delete().eq('id', existing.id)
+      : await existingSupabaseClient.from('network_follows').insert({ follower_id: uid, following_id: target, status: 'approved' });
+    if (error) throw error;
+    return this.fetchUsers(currentUser);
   },
 
   // Follow Requests and Library Privacy Access Requests (Clean with no dummy requests)
@@ -1481,75 +1040,41 @@ export const connectivityService = {
     }
   },
 
-  requestLibraryAccess(
-    targetUserId: string,
-    currentUser: UserProfile
-  ): { success: boolean; request: LibraryAccessRequest } {
-    const currentMapped = mapProfileToNetworkUser(currentUser);
-    const existing = this.getAccessRequests(currentUser);
-
-    const alreadyReq = existing.find(
-      (r) => r.requesterId === currentMapped.id && r.targetUserId === targetUserId
-    );
-    if (alreadyReq) {
-      return { success: true, request: alreadyReq };
-    }
-
-    const newReq: LibraryAccessRequest = {
-      id: `req-${Date.now()}`,
-      requesterId: currentMapped.id,
-      requesterName: currentMapped.name,
-      requesterAvatar: currentMapped.avatarUrl,
-      requesterHeadline: currentMapped.headline,
-      targetUserId,
-      requestedAt: 'Just now',
-      status: 'pending',
-    };
-
-    const updated = [newReq, ...existing];
-    this.saveAccessRequests(updated, currentUser);
-
-    if (existingSupabaseClient) {
-      resolveUserUuid(existingSupabaseClient, currentUser).then((uid) => {
-        if (!uid) return;
-        existingSupabaseClient.from('library_access_requests').upsert({
-          requester_id: uid,
-          target_user_id: targetUserId,
-          status: 'pending',
-          updated_at: new Date().toISOString(),
-        }, { onConflict: 'requester_id, target_user_id' }).then(() => {});
-      }).catch((err) => console.warn('Supabase requestLibraryAccess notice:', err));
-    }
-
-    return { success: true, request: newReq };
+  async fetchAccessRequests(currentUser: UserProfile): Promise<LibraryAccessRequest[]> {
+    const uid = await requireConnectivityUser();
+    const { data, error } = await existingSupabaseClient.from('library_access_requests')
+      .select('*,requester:profiles!library_access_requests_requester_id_fkey(name,avatar_url,headline)')
+      .or(`requester_id.eq.${uid},target_user_id.eq.${uid}`).order('requested_at', { ascending: false });
+    if (error) throw error;
+    const requests = (data || []).map(row => ({ id: row.id, requesterId: row.requester_id,
+      requesterName: row.requester?.name || 'Member', requesterAvatar: row.requester?.avatar_url || '',
+      requesterHeadline: row.requester?.headline || '', targetUserId: row.target_user_id,
+      requestedAt: new Date(row.requested_at).toLocaleString(), status: row.status }));
+    this.saveAccessRequests(requests, currentUser);
+    return requests;
   },
 
-  respondToAccessRequest(
-    requestId: string,
-    decision: 'approved' | 'declined',
-    currentUser?: UserProfile
-  ): LibraryAccessRequest[] {
-    const existing = this.getAccessRequests(currentUser);
-    const updated = existing.map((r) => {
-      if (r.id === requestId) {
-        return { ...r, status: decision };
-      }
-      return r;
+  async requestLibraryAccess(targetUserId: string, currentUser: UserProfile)
+    : Promise<{ success: boolean; request: LibraryAccessRequest }> {
+    const uid = await requireConnectivityUser();
+    const { error } = await existingSupabaseClient.from('library_access_requests').insert({
+      requester_id: uid, target_user_id: targetUserId, status: 'pending',
     });
-    this.saveAccessRequests(updated, currentUser);
+    if (error && error.code !== '23505') throw error;
+    const requests = await this.fetchAccessRequests(currentUser);
+    const request = requests.find(r => r.targetUserId === targetUserId && r.requesterId === uid);
+    if (!request) throw new Error('Could not load your access request.');
+    return { success: true, request };
+  },
 
-    if (existingSupabaseClient) {
-      const matched = existing.find((r) => r.id === requestId);
-      if (matched) {
-        existingSupabaseClient
-          .from('library_access_requests')
-          .update({ status: decision, updated_at: new Date().toISOString() })
-          .eq('requester_id', matched.requesterId)
-          .then(() => {});
-      }
-    }
-
-    return updated;
+  async respondToAccessRequest(requestId: string, decision: 'approved' | 'declined', currentUser: UserProfile)
+    : Promise<LibraryAccessRequest[]> {
+    const uid = await requireConnectivityUser();
+    const { data, error } = await existingSupabaseClient.from('library_access_requests')
+      .update({ status: decision, responded_at: new Date().toISOString() })
+      .eq('id', requestId).eq('target_user_id', uid).select('id').single();
+    if (error || !data) throw error || new Error('Access request was not found.');
+    return this.fetchAccessRequests(currentUser);
   },
 
   getUserLibraries(currentUser?: UserProfile): Record<string, UserLibraryItem[]> {
@@ -2020,7 +1545,7 @@ export const supabaseService = {
         const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
         if (uid) {
           const { data, error } = await existingSupabaseClient
-            .from('youtube_learning_tracks')
+            .from('youtube_tracks')
             .select('*')
             .eq('user_id', uid)
             .order('last_watched', { ascending: false });
@@ -2038,7 +1563,7 @@ export const supabaseService = {
               durationSeconds: t.duration_seconds || 0,
               durationFormatted: t.duration_formatted || '0m',
               verifiedWatchedSeconds: t.verified_watched_seconds || 0,
-              currentTime: Number(t.current_time) || 0,
+              currentTime: Number(t.current_time_spent) || 0,
               completionPercentage: Number(t.completion_percentage) || 0,
               status: t.status || 'in_progress',
               watchedRanges: t.watched_ranges || [],
@@ -2062,7 +1587,7 @@ export const supabaseService = {
     try {
       const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
       if (!uid) return;
-      await existingSupabaseClient.from('youtube_learning_tracks').upsert({
+      await existingSupabaseClient.from('youtube_tracks').upsert({
         user_id: uid,
         video_id: track.videoId,
         video_url: track.videoUrl,
@@ -2073,7 +1598,7 @@ export const supabaseService = {
         duration_seconds: track.durationSeconds || 0,
         duration_formatted: track.durationFormatted || '0m',
         verified_watched_seconds: track.verifiedWatchedSeconds || 0,
-        current_time: track.currentTime || 0,
+        current_time_spent: track.currentTime || 0,
         completion_percentage: track.completionPercentage || 0,
         status: track.status || 'in_progress',
         watched_ranges: track.watchedRanges || [],
@@ -2093,13 +1618,13 @@ export const supabaseService = {
     try {
       const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
       if (!uid) return;
-      await existingSupabaseClient.from('youtube_learning_tracks').delete().eq('user_id', uid).eq('video_id', videoId);
+      await existingSupabaseClient.from('youtube_tracks').delete().eq('user_id', uid).eq('video_id', videoId);
     } catch (e) {
       console.warn('deleteYouTubeTrack error:', e);
     }
   },
 
-  // 3. Fetch Real Opportunities from Supabase `opportunities` table and `user_opportunity_interactions`
+  // 3. Fetch Real Opportunities from Supabase `opportunities` table and `user_opportunities`
   async fetchOpportunities(currentUser?: UserProfile): Promise<OpportunityItem[]> {
     const cacheKey = `catalog_opportunities_${currentUser?.email || 'all'}`;
     const cached = getFromMemoryCache<OpportunityItem[]>(cacheKey);
@@ -2114,7 +1639,7 @@ export const supabaseService = {
             const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
             if (uid) {
               const { data: interactions } = await existingSupabaseClient
-                .from('user_opportunity_interactions')
+                .from('user_opportunities')
                 .select('*')
                 .eq('user_id', uid);
               if (Array.isArray(interactions)) {
@@ -2164,7 +1689,7 @@ export const supabaseService = {
     try {
       const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
       if (!uid) return;
-      await existingSupabaseClient.from('user_opportunity_interactions').upsert({
+      await existingSupabaseClient.from('user_opportunities').upsert({
         user_id: uid,
         opportunity_id: opportunityId,
         saved: isSaved,
@@ -2179,7 +1704,7 @@ export const supabaseService = {
     try {
       const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
       if (!uid) return;
-      await existingSupabaseClient.from('user_opportunity_interactions').upsert({
+      await existingSupabaseClient.from('user_opportunities').upsert({
         user_id: uid,
         opportunity_id: opportunityId,
         applied: true,
@@ -2258,7 +1783,6 @@ export const supabaseService = {
         certification_id: certificationId,
         status,
         prep_progress: status === 'Earned' ? 100 : status === 'In Progress' ? 50 : 0,
-        earned_date: status === 'Earned' ? new Date().toISOString() : null,
       }, { onConflict: 'user_id, certification_id' });
     } catch (e) {
       console.warn('updateUserCertification error:', e);
@@ -2453,28 +1977,23 @@ export const supabaseService = {
     return initialAssignments;
   },
 
-  async submitAssignment(assignmentId: string, submission: { githubRepoUrl: string; notes?: string; score?: number; feedback?: string }, currentUser: UserProfile): Promise<void> {
-    if (!existingSupabaseClient) return;
-    try {
-      const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
-      if (!uid) return;
-      await existingSupabaseClient.from('assignment_submissions').upsert({
-        user_id: uid,
-        assignment_id: assignmentId,
-        status: 'Graded',
-        github_repo_url: submission.githubRepoUrl,
-        submission_content: submission.notes,
-        score: submission.score || 96,
-        feedback: submission.feedback,
-        submitted_at: new Date().toISOString(),
-        graded_at: new Date().toISOString(),
-      }, { onConflict: 'user_id, assignment_id' });
-    } catch (e) {
-      console.warn('submitAssignment error:', e);
+  async submitAssignment(assignmentId: string, submission: { githubRepoUrl: string; notes?: string }, currentUser: UserProfile): Promise<void> {
+    const uid = await requireConnectivityUser();
+    if (!/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(assignmentId)) {
+      throw new Error('This is a sample assignment. A published assignment is required to submit for review.');
     }
+    const { error } = await existingSupabaseClient.from('assignment_submissions').upsert({
+      user_id: uid,
+      assignment_id: assignmentId,
+      status: 'Submitted',
+      github_repo_url: submission.githubRepoUrl,
+      notes: submission.notes,
+      submitted_at: new Date().toISOString(),
+    }, { onConflict: 'user_id, assignment_id' });
+    if (error) throw error;
   },
 
-  // 7. Fetch Industry Tools from Supabase `industry_tools` and `user_tool_progress`
+  // 7. Fetch Industry Tools from Supabase `industry_tools` and `user_industry_tool_statuses`
   async fetchIndustryTools(currentUser?: UserProfile): Promise<IndustryTool[]> {
     const cacheKey = `catalog_tools_${currentUser?.email || 'all'}`;
     const cached = getFromMemoryCache<IndustryTool[]>(cacheKey);
@@ -2489,7 +2008,7 @@ export const supabaseService = {
             const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
             if (uid) {
               const { data: progressList } = await existingSupabaseClient
-                .from('user_tool_progress')
+                .from('user_industry_tool_statuses')
                 .select('*')
                 .eq('user_id', uid);
               if (Array.isArray(progressList)) {
@@ -2530,7 +2049,7 @@ export const supabaseService = {
     try {
       const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
       if (!uid) return;
-      await existingSupabaseClient.from('user_tool_progress').upsert({
+      await existingSupabaseClient.from('user_industry_tool_statuses').upsert({
         user_id: uid,
         tool_id: toolId,
         status,
@@ -2552,7 +2071,7 @@ export const supabaseService = {
         const { data, error } = await existingSupabaseClient
           .from('roadmap_nodes')
           .select('*')
-          .order('order_index', { ascending: true });
+          .order('sort_order', { ascending: true });
 
         if (!error && Array.isArray(data) && data.length > 0) {
           const userProgressMap = new Map<string, { status: 'completed' | 'current' | 'upcoming'; progress: number }>();
@@ -2655,7 +2174,7 @@ export const supabaseService = {
     try {
       const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
       if (!uid) return;
-      await existingSupabaseClient.from('certificates').upsert({
+      await existingSupabaseClient.from('generated_certificates').upsert({
         serial_id: cert.serialId,
         user_id: uid,
         type: cert.type,
@@ -2687,9 +2206,9 @@ export const supabaseService = {
     try {
       const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
       if (!uid) return;
-      await existingSupabaseClient.from('safety_reports').insert({
+      await existingSupabaseClient.from('scam_reports').insert({
         user_id: uid,
-        job_offer_text: jobOfferText,
+        analyzed_text: jobOfferText,
         risk_score: report.riskScore ?? 0,
         risk_level: report.riskLevel || 'LOW RISK',
         summary: report.summary || 'Safety analysis completed.',
