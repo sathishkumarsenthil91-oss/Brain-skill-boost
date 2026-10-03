@@ -1285,6 +1285,10 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
                               {!!conv?.unreadCount && <span className="ml-1 rounded-full bg-purple-600 px-1.5 text-white">{conv.unreadCount}</span>}
                             </span>
                           </div>
+                          <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 mt-1 text-[11px] font-semibold ${peerUser.onlineStatus === 'online' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}>
+                            <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${peerUser.onlineStatus === 'online' ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+                            {peerUser.onlineStatus === 'online' ? 'Active' : 'Offline'}
+                          </span>
                           <p className="text-[11px] text-slate-600 dark:text-slate-300 truncate mt-0.5">
                             {conv?.lastMessage || `${peerUser.role} @ ${peerUser.company}`}
                           </p>
@@ -1331,7 +1335,7 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
                           <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white group-hover:text-purple-600 transition-colors truncate">
                             {activeChatUser.name}
                           </h4>
-                          <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                          <p className={`text-xs font-semibold rounded-full px-2 py-1 mt-1 ${activeChatUser.onlineStatus === 'online' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}>
                             {statusLabel(activeChatUser)}
                           </p>
                         </div>
@@ -1384,8 +1388,8 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
                               {msg.attachmentPath && (msg.attachmentUrl ? <a href={msg.attachmentUrl} target="_blank" rel="noreferrer"><img src={msg.attachmentUrl} alt="Shared chat photo" className="max-h-64 rounded-xl mb-2 object-contain" /></a> : <p>Photo unavailable. Reopen this chat to retry.</p>)}
                               {msg.content}
                             </div>
-                            <span className="text-[10px] text-slate-400 mt-1 px-1 flex gap-1 items-center">{msg.timestamp}
-                              {isMe && <span aria-label={msg.isRead ? 'Read' : msg.deliveredAt ? 'Delivered' : 'Sent'} title={msg.isRead ? 'Read' : msg.deliveredAt ? 'Delivered' : 'Sent'} className={msg.isRead ? 'text-blue-500' : ''}>{msg.isRead || msg.deliveredAt ? '✓✓' : '✓'}</span>}
+                            <span className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 px-1 flex flex-wrap gap-2 items-center">{msg.timestamp}
+                              {isMe && <span aria-label={msg.isRead ? 'Read' : msg.deliveredAt ? 'Delivered' : 'Sent'} className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ${msg.isRead ? 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}><span aria-hidden="true">{msg.isRead || msg.deliveredAt ? '✓✓' : '✓'}</span>{msg.isRead ? 'Read' : msg.deliveredAt ? 'Delivered' : 'Sent'}</span>}
                             </span>
                           </div>
                         );
