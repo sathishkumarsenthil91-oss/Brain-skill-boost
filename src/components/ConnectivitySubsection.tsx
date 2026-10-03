@@ -105,7 +105,7 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
     const url = URL.createObjectURL(chatPhoto); setChatPhotoPreview(url);
     return () => URL.revokeObjectURL(url);
   }, [chatPhoto]);
-  const statusLabel = (peer: NetworkUser) => peer.onlineStatus === 'online' ? `Online${peer.onlineAt ? ` since ${new Date(peer.onlineAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}` : ''}` : peer.lastSeenAt ? `Last seen ${new Date(peer.lastSeenAt).toLocaleString()}` : 'Offline';
+  const statusLabel = (peer: NetworkUser) => peer.onlineStatus === 'online' ? `Active${peer.onlineAt ? ` since ${new Date(peer.onlineAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}` : ''}` : peer.lastSeenAt ? `Offline · Last seen ${new Date(peer.lastSeenAt).toLocaleString()}` : 'Offline';
   const sectionHeaderRef = useRef<HTMLElement>(null);
   const bottomNavRef = useRef<HTMLElement>(null);
   const [chatBounds, setChatBounds] = useState({ top: 144, bottom: 80, keyboardInset: 0 });
@@ -1281,7 +1281,7 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
                               {peerUser.name}
                             </h4>
                             <span className="text-[10px] text-slate-600 dark:text-slate-300 font-semibold shrink-0">
-                              {conv?.lastMessageTime || (peerUser.onlineStatus === 'online' ? 'Online' : 'Offline')}
+                              {conv?.lastMessageTime || (peerUser.onlineStatus === 'online' ? 'Active' : 'Offline')}
                               {!!conv?.unreadCount && <span className="ml-1 rounded-full bg-purple-600 px-1.5 text-white">{conv.unreadCount}</span>}
                             </span>
                           </div>
