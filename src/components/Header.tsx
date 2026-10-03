@@ -12,6 +12,7 @@ interface HeaderProps {
   onOpenAuth: (type: 'login' | 'register') => void;
   onSignOut?: () => void;
   onOpenCopilot?: () => void;
+  notificationControl?: React.ReactNode;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -23,6 +24,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAuth,
   onSignOut,
   onOpenCopilot,
+  notificationControl,
 }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -255,6 +257,7 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Right Actions: AI Copilot Quick Button, Theme Toggle, User Profile Avatar */}
         <div className="flex items-center gap-1 min-[390px]:gap-2 sm:gap-3 shrink-0">
+          {notificationControl}
           {/* Smart Copilot Quick Launcher */}
           {onOpenCopilot && (
             <button

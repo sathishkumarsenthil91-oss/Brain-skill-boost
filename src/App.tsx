@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, Suspense, lazy } from 'react';
 import { ViewType, UserProfile, SkillItem, RoadmapNode } from './types';
 import { initialUserProfile, initialSkills, initialRoadmapNodes } from './data/mockData';
 import { Header } from './components/Header';
+import { NotificationCenter } from './components/NotificationCenter';
 import { BottomNav } from './components/BottomNav';
 import { AuthView } from './components/AuthView';
 import { LandingHero } from './components/LandingHero';
@@ -121,13 +122,9 @@ export default function App() {
     return connectivityService.startActivityTracking();
   }, [user.id]);
 
-  const [messageNotice, setMessageNotice] = useState<{ name: string; peerId: string } | null>(null);
   useEffect(() => {
     if (!user.id || currentView === 'connectivity' || currentView === 'network') return;
-    return connectivityService.subscribeToRealtimeChat(user, (_message, peer) => {
-      setMessageNotice({ name: peer.name, peerId: peer.id });
-      if ('Notification' in window && Notification.permission === 'granted' && document.visibilityState !== 'visible') new Notification('Brain Boost message', { body: `New message from ${peer.name}`, tag: peer.id });
-    });
+    return connectivityService.subscribeToRealtimeChat(user, () => {});
   }, [user.id, currentView]);
 
   // Sync dark mode class with root html element and localStorage
@@ -387,7 +384,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#f8fafc] dark:bg-[#0b1329] text-[#0f172a] dark:text-[#f8fafc] transition-colors duration-200">
-      {messageNotice && <button type="button" onClick={() => { setMessageNotice(null); handleNavigate('connectivity'); }} className="fixed top-20 right-4 z-[100] rounded-xl bg-purple-600 text-white p-3 shadow-lg">New message from {messageNotice.name} — open Connectivity</button>}
       {serviceError && <div role="alert" className="fixed bottom-20 left-4 right-4 z-[100] rounded-xl bg-red-50 p-4 text-red-800 shadow-lg">
         {serviceError}<button className="ml-4 underline" onClick={() => setServiceError('')}>Dismiss</button>
       </div>}
@@ -401,6 +397,7 @@ export default function App() {
         onOpenAuth={() => setIsAuthOpen(true)}
         onSignOut={handleSignOut}
         onOpenCopilot={() => setIsCopilotOpen(true)}
+        notificationControl={user.id ? <NotificationCenter userId={user.id} onNavigate={handleNavigate} /> : null}
       />
 
       {/* Main View Router for all 14 sections */}

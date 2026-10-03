@@ -285,7 +285,6 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
           }).catch(() => {});
         } else {
           showToast(`New message from ${participant.name}`);
-          if ('Notification' in window && Notification.permission === 'granted' && document.visibilityState !== 'visible') new Notification('Brain Boost message', { body: `New message from ${participant.name}`, tag: participant.id });
         }
 
       },
@@ -629,6 +628,25 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
   );
 
   useEffect(() => { setActiveChatUser(previous => previous ? users.find(peer => peer.id === previous.id) || previous : null); }, [users]);
+  useEffect(() => {
+    const openNotificationChat = () => {
+      if (sessionStorage.getItem('brainboost_open_requests')) {
+        sessionStorage.removeItem('brainboost_open_requests'); setShowAccessRequestsModal(true);
+      }
+      const libraryPeer = users.find(candidate => candidate.id === sessionStorage.getItem('brainboost_open_library'));
+      if (libraryPeer) {
+        sessionStorage.removeItem('brainboost_open_library'); setViewingUser(libraryPeer); setActiveTab('profile'); setProfileTab('library');
+      }
+      const peerId = sessionStorage.getItem('brainboost_open_chat');
+      const peer = users.find(candidate => candidate.id === peerId);
+      if (!peer) return;
+      sessionStorage.removeItem('brainboost_open_chat');
+      void openChatWithUser(peer);
+    };
+    openNotificationChat();
+    window.addEventListener('open-notification-chat', openNotificationChat);
+    return () => window.removeEventListener('open-notification-chat', openNotificationChat);
+  }, [users, user.id]);
 
   // Active conversation object for chat tab
   const activeConversation = activeChatUser
@@ -729,18 +747,14 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
             <span className="hidden sm:inline">Create Post</span>
           </button>
 
-          {/* Access Requests & Notifications Trigger */}
+          {/* Shared notification inbox */}
           <button
-            onClick={() => setShowAccessRequestsModal(true)}
+            onClick={() => window.dispatchEvent(new Event('open-notifications'))}
             className="relative p-2 rounded-xl bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 hover:text-purple-600 dark:hover:text-purple-400 transition-colors cursor-pointer border border-slate-200 dark:border-slate-700 shrink-0"
-            title="Library Access Requests"
+            title="Notifications"
+            aria-label="Open notification inbox"
           >
             <span className="material-symbols-outlined text-[18px]">notifications</span>
-            {pendingRequestsForMe.length > 0 && (
-              <span className="absolute -top-1 -right-1 w-4 h-4 bg-rose-500 text-white text-[9px] font-black rounded-full flex items-center justify-center animate-pulse">
-                {pendingRequestsForMe.length}
-              </span>
-            )}
           </button>
         </div>
       </header>
@@ -1225,7 +1239,7 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
                   <span className="text-[10px] sm:text-[11px] font-bold text-emerald-500 flex items-center gap-1">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                     Live Sync
-                    <button type="button" className="ml-2 text-purple-600" onClick={async () => { if (!('Notification' in window)) { showToast('Browser notifications are unavailable.'); return; } const permission = await Notification.requestPermission(); showToast(permission === 'granted' ? 'Message notifications enabled.' : 'New messages still appear in the app.'); }}>Enable notifications</button>
+                    <button type="button" className="ml-2 text-purple-600" onClick={() => window.dispatchEvent(new Event('open-notifications'))}>Notifications &amp; alerts</button>
                   </span>
                 </div>
                 <div className="relative">
