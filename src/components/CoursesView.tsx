@@ -81,8 +81,8 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
   const [certModalItem, setCertModalItem] = useState<{ type: 'course' | 'youtube_track'; item: CourseItem | YouTubeLearningTrack } | null>(null);
   const [certToast, setCertToast] = useState<string | null>(null);
 
-  const handleCertificateClaimed = (cert: GeneratedCertificate) => {
-    supabaseService.saveCertificate(cert, user);
+  const handleCertificateClaimed = async (cert: GeneratedCertificate) => {
+    await supabaseService.saveCertificate(cert, user, true);
     if (onUpdateUser) {
       const existingCerts = user.earnedCertificates || [];
       const updated = [...existingCerts.filter((c) => c.serialId !== cert.serialId), cert];
@@ -94,6 +94,8 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
     setCertToast(`🎉 Certificate ${cert.serialId} saved to your profile!`);
     setTimeout(() => setCertToast(null), 4000);
   };
+
+  const openLearningCertificates = () => { sessionStorage.setItem('brainboost_open_learning', 'true'); onNavigate('connectivity'); };
 
   // Recommended Tech Labs for instant one-click testing & learning
   const RECOMMENDED_LABS = [
@@ -332,7 +334,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
             <div className="h-8 w-px bg-white/20" />
             <div className="text-center px-2">
               <span className="text-2xl font-black text-emerald-400">
-                {youtubeTracks.filter((t) => t.status === 'completed' || t.completionPercentage >= 85).length}
+                {youtubeTracks.filter((t) => t.durationSeconds > 0 && t.verifiedWatchedSeconds >= t.durationSeconds).length}
               </span>
               <span className="text-[11px] block text-slate-300 font-semibold">Verified Records</span>
             </div>
@@ -503,7 +505,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {youtubeTracks.map((track) => {
-                const isCompleted = track.status === 'completed' || track.completionPercentage >= 85;
+                const isCompleted = track.durationSeconds > 0 && track.verifiedWatchedSeconds >= track.durationSeconds;
                 const formattedLastWatched = track.lastWatched
                   ? new Date(track.lastWatched).toLocaleDateString([], {
                       month: 'short',
@@ -634,7 +636,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
                           </button>
 
                           <button
-                            onClick={() => setCertModalItem({ type: 'youtube_track', item: track })}
+                            onClick={() => openLearningCertificates()}
                             className="p-2.5 rounded-xl border border-blue-200 dark:border-blue-900/60 bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/60 transition-colors cursor-pointer"
                             title="Generate & Download Certificate"
                           >
@@ -645,7 +647,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
                         {isCompleted && (
                           <div className="flex items-center gap-2 pt-1">
                             <button
-                              onClick={() => setCertModalItem({ type: 'youtube_track', item: track })}
+                              onClick={() => openLearningCertificates()}
                               className="flex-1 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs"
                             >
                               <span className="material-symbols-outlined text-[15px]">workspace_premium</span>
@@ -895,7 +897,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
           onUpdateTrack={handleUpdateTrack}
           onClose={() => setActivePlayerTrack(null)}
           onAskNebulaAI={onAskNebulaAI}
-          onGenerateCertificate={(track) => setCertModalItem({ type: 'youtube_track', item: track })}
+          onGenerateCertificate={(track) => openLearningCertificates()}
         />
       )}
 

@@ -14,6 +14,7 @@ import { CertificateGenerationModal } from './CertificateGenerationModal';
 import { ConnectivityProfileSetupModal } from './connectivity/ConnectivityProfileSetupModal';
 import { ConnectivityDirectory } from './connectivity/ConnectivityDirectory';
 import { FollowersFollowingModal } from './connectivity/FollowersFollowingModal';
+import { LearningCertificates } from './connectivity/LearningCertificates';
 
 interface ConnectivitySubsectionProps {
   user: UserProfile;
@@ -630,6 +631,9 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
   useEffect(() => { setActiveChatUser(previous => previous ? users.find(peer => peer.id === previous.id) || previous : null); }, [users]);
   useEffect(() => {
     const openNotificationChat = () => {
+      if (sessionStorage.getItem('brainboost_open_learning')) {
+        sessionStorage.removeItem('brainboost_open_learning'); setViewingUser(null); setActiveTab('profile'); setProfileTab('certificates');
+      }
       if (sessionStorage.getItem('brainboost_open_requests')) {
         sessionStorage.removeItem('brainboost_open_requests'); setShowAccessRequestsModal(true);
       }
@@ -1166,7 +1170,7 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
               </button>
               <div>
                 <span className="block text-base font-black text-emerald-600 dark:text-emerald-400">
-                  {user.learningProgress || 68}%
+                  {user.learningProgress ?? 0}%
                 </span>
                 <span className="text-[10px] text-slate-400 font-bold uppercase">Progress</span>
               </div>
@@ -1702,9 +1706,9 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
             {[
               { id: 'posts', label: `Posts (${profilePosts.length})`, icon: 'grid_view' },
               { id: 'info', label: 'Skills', icon: 'psychology' },
-              { id: 'certificates', label: `Certificates (${activeProfile.certificates?.length || 0})`, icon: 'military_tech' },
+              { id: 'certificates', label: isViewingSelf ? 'Learning & Certificates' : `Certificates (${activeProfile.certificates?.length || 0})`, icon: 'military_tech' },
               { id: 'library', label: 'Enrollments', icon: 'local_library', badge: activeProfile.isPrivate && !isViewingSelf ? 'Locked' : `${activeProfile.libraryItems?.length || 0}` },
-            ].map((tab) => (
+            ].filter(tab => !isViewingSelf || tab.id !== 'library').map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setProfileTab(tab.id as any)}
@@ -2041,8 +2045,9 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
             </div>
           )}
 
-          {/* Tab 2: Certificates */}
-          {profileTab === 'certificates' && (
+          {isViewingSelf && (profileTab === 'certificates' || profileTab === 'library') && <LearningCertificates user={user} onNavigate={onNavigate} onUpdateUser={onUpdateUser} />}
+          {/* Other members' issued certificates */}
+          {profileTab === 'certificates' && !isViewingSelf && (
             <div className="space-y-4">
               {activeProfile.certificates && activeProfile.certificates.length > 0 ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -2092,7 +2097,7 @@ export const ConnectivitySubsection: React.FC<ConnectivitySubsectionProps> = ({
           )}
 
           {/* Tab 3: Library (Currently Learning) with Privacy Enforcement */}
-          {profileTab === 'library' && (
+          {profileTab === 'library' && !isViewingSelf && (
             <div className="space-y-4">
               {/* Privacy Enforcement Check */}
               {activeProfile.isPrivate && !isViewingSelf && !activeProfile.hasAccessToLibrary ? (
