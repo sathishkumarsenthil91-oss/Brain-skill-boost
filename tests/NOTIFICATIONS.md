@@ -1,0 +1,9 @@
+Notification inbox stores the newest 100 entries per account, with unread indicators, category filters, mark-all-read, real-time refresh and a 20-second fallback refresh. New database events generate message, follow, like, comment, library request, permitted shared-resource, catalog-update and completed-AI-result notifications. Existing activity is not backfilled. Reading a chat clears the corresponding message notifications.
+
+Permission controls show enabled, blocked, dismissed and unsupported states. A granted permission sends a test notification through the service worker, avoiding the unsupported Notification constructor on mobile. Browser alerts require device/browser permission and an open application session. Delivery after the app is fully closed requires a server push service and is not implemented here. AI result alerts require a successful AI generation; this change does not replenish provider credits.
+
+Passed: TypeScript, production build, desktop/mobile inbox at 360, 390 and 1440 pixels, filtering, unread updates and reload persistence, denied-permission guidance, service-worker test-alert path and opening the correct message conversation. Browser APIs and the inbox endpoint are controlled fixtures in the UI tests, so actual OS banner display is device-dependent.
+
+Database integration checks use two isolated temporary users and roll back the entire transaction: message, social, AI, catalog and shared-resource triggers; private library exclusion; account isolation; read persistence; forbidden notification-content editing; chat-read notification acknowledgement. No test events are committed or delivered to customer accounts.
+
+Security advisor found no new schema issues. Existing unrelated account setting: [leaked-password protection is disabled](https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection).
