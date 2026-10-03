@@ -157,8 +157,8 @@ export const YouTubeSkillTrackPlayer: React.FC<YouTubeSkillTrackPlayerProps> = (
     const currentUser = userRef.current;
     const totalSecs = calculateTotalVerifiedSeconds(watchedRangesRef.current);
     const dur = duration > 0 ? duration : (currentTrack.durationSeconds || 1200);
-    const rawPercent = dur > 0 ? Math.min(100, Math.round((totalSecs / dur) * 100)) : 0;
-    const isCompleted = rawPercent >= 85 || currentTrack.status === 'completed';
+    const rawPercent = dur > 0 ? Math.min(100, Math.floor((totalSecs / dur) * 100)) : 0;
+    const isCompleted = totalSecs >= dur;
 
     let record = currentTrack.learningRecord;
     if (isCompleted && !record) {
@@ -295,7 +295,7 @@ export const YouTubeSkillTrackPlayer: React.FC<YouTubeSkillTrackPlayerProps> = (
         const updatedRanges = mergeWatchedInterval(prevRanges, [prev, current]);
         watchedRangesRef.current = updatedRanges;
         const totalSecs = calculateTotalVerifiedSeconds(updatedRanges);
-        const rawPercent = dur > 0 ? Math.min(100, Math.round((totalSecs / dur) * 100)) : 0;
+        const rawPercent = dur > 0 ? Math.min(100, Math.floor((totalSecs / dur) * 100)) : 0;
 
         setWatchedRanges(updatedRanges);
         setVerifiedSeconds(totalSecs);
@@ -450,7 +450,7 @@ export const YouTubeSkillTrackPlayer: React.FC<YouTubeSkillTrackPlayerProps> = (
     });
   };
 
-  const isCompleted = completionPercentage >= 85 || track.status === 'completed';
+  const isCompleted = duration > 0 && verifiedSeconds >= duration;
   const learningRecord = track.learningRecord || (isCompleted ? createUnofficialRecord(user.name, user.email, track) : null);
 
   const handleCopyRecordId = () => {
@@ -882,7 +882,7 @@ export const YouTubeSkillTrackPlayer: React.FC<YouTubeSkillTrackPlayerProps> = (
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-400">
-                  {isCompleted ? 'Unofficial Record ready' : 'Earn certificate record at 85%'}
+                  {isCompleted ? 'Unofficial Record ready' : 'Earn certificate record at 100%'}
                 </p>
               </div>
             </div>
@@ -1235,7 +1235,7 @@ export const YouTubeSkillTrackPlayer: React.FC<YouTubeSkillTrackPlayerProps> = (
                 <div className="w-14 h-14 mx-auto rounded-2xl bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center">
                   <span className="material-symbols-outlined text-[32px]">lock_clock</span>
                 </div>
-                <h4 className="text-base font-bold text-white">Record Unlocks at 85% Verified Watch Time</h4>
+                <h4 className="text-base font-bold text-white">Record Unlocks at 100% Verified Watch Time</h4>
                 <p className="text-xs text-slate-400 max-w-md mx-auto">
                   You have verified <strong>{formatSecondsToTime(verifiedSeconds)}</strong> ({completionPercentage}%). Continue watching without skipping to unlock your shareable Brainboost completion certificate!
                 </p>

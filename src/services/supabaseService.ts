@@ -91,7 +91,7 @@ const emptyNetworkVerification = (): NonNullable<NetworkUser['verification']> =>
   learningEvidenceCount: 0,
 });
 
-const mapGeneratedCertificateRow = (row: any): GeneratedCertificate => {
+export const mapGeneratedCertificateRow = (row: any): GeneratedCertificate => {
   const allowedTypes = ['course', 'webinar', 'youtube_track', 'specialization'];
   return {
     id: row.id,
@@ -1831,7 +1831,7 @@ export const supabaseService = {
   },
 
   // Real YouTube learning tracks from Supabase
-  async fetchYouTubeTracks(currentUser: UserProfile): Promise<YouTubeLearningTrack[]> {
+  async fetchYouTubeTracks(currentUser: UserProfile, strict = false): Promise<YouTubeLearningTrack[]> {
     if (existingSupabaseClient) {
       try {
         const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
@@ -1841,6 +1841,7 @@ export const supabaseService = {
             .select('*')
             .eq('user_id', uid)
             .order('last_watched', { ascending: false });
+          if (error) throw error;
 
           if (!error && Array.isArray(data) && data.length > 0) {
             return data.map((t: any) => ({
@@ -1868,6 +1869,7 @@ export const supabaseService = {
           }
         }
       } catch (err) {
+        if (strict) throw new Error('Saved learning progress could not load. Please retry.');
         console.warn('fetchYouTubeTracks error:', err);
       }
     }
@@ -1879,7 +1881,7 @@ export const supabaseService = {
     try {
       const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
       if (!uid) return;
-      await existingSupabaseClient.from('youtube_tracks').upsert({
+      const { error } = await existingSupabaseClient.from('youtube_tracks').upsert({
         user_id: uid,
         video_id: track.videoId,
         video_url: track.videoUrl,
@@ -1900,7 +1902,9 @@ export const supabaseService = {
         last_watched: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       }, { onConflict: 'user_id, video_id' });
+      if (error) throw error;
     } catch (e) {
+      reportServiceError('Learning progress could not be saved. Check your connection and retry before claiming a certificate.');
       console.warn('saveYouTubeTrack error:', e);
     }
   },
@@ -2461,12 +2465,12 @@ export const supabaseService = {
   },
 
   // 9. Certificates Persistence in Supabase `certificates` table
-  async saveCertificate(cert: GeneratedCertificate, currentUser: UserProfile): Promise<void> {
-    if (!existingSupabaseClient) return;
+  async saveCertificate(cert: GeneratedCertificate, currentUser: UserProfile, strict = false): Promise<void> {
+    if (!existingSupabaseClient) { if (strict) throw new Error('Please sign in to save your certificate.'); return; }
     try {
       const uid = await resolveUserUuid(existingSupabaseClient, currentUser);
-      if (!uid) return;
-      await existingSupabaseClient.from('generated_certificates').upsert({
+      if (!uid) { if (strict) throw new Error('Please sign in to save your certificate.'); return; }
+      const { error } = await existingSupabaseClient.from('generated_certificates').upsert({
         serial_id: cert.serialId,
         user_id: uid,
         type: cert.type,
@@ -2487,7 +2491,9 @@ export const supabaseService = {
         verification_url: cert.verificationUrl || `https://brainboost.ai/verify/${cert.serialId}`,
         verification_badge: cert.verificationBadge,
       }, { onConflict: 'serial_id' });
+      if (error) throw error;
     } catch (e) {
+      if (strict) throw new Error('Certificate could not be saved. Please retry.');
       console.warn('saveCertificate error:', e);
     }
   },

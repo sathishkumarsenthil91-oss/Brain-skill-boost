@@ -7,7 +7,7 @@ interface CertificateGenerationModalProps {
   item: CourseItem | WebinarItem | YouTubeLearningTrack;
   user: UserProfile;
   onClose: () => void;
-  onCertificateClaimed: (certificate: GeneratedCertificate) => void;
+  onCertificateClaimed: (certificate: GeneratedCertificate) => void | Promise<void>;
   onShareToNetwork?: (certificate: GeneratedCertificate) => void;
 }
 
@@ -24,7 +24,8 @@ export const CertificateGenerationModal: React.FC<CertificateGenerationModalProp
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
   const [isDownloading, setIsDownloading] = useState<boolean>(false);
   const [hasClaimed, setHasClaimed] = useState<boolean>(false);
-  const [simulatedWatchComplete, setSimulatedWatchComplete] = useState<boolean>(false);
+  const [claimError, setClaimError] = useState('');
+
 
   // Extract common metadata based on item type
   let title = '';
@@ -62,13 +63,10 @@ export const CertificateGenerationModal: React.FC<CertificateGenerationModalProp
       requiredWatchTimeSeconds = 14400;
     }
 
-    if (simulatedWatchComplete) {
-      completionPercentage = 100;
-      watchTimeSeconds = requiredWatchTimeSeconds;
-    }
 
-    // Require at least 80% to claim certificate
-    isWatchTimeSufficient = completionPercentage >= 80;
+
+    // Require complete learning before claiming.
+    isWatchTimeSufficient = completionPercentage >= 100;
   } else if (type === 'webinar') {
     const webinar = item as WebinarItem;
     title = webinar.title;
@@ -93,12 +91,9 @@ export const CertificateGenerationModal: React.FC<CertificateGenerationModalProp
     watchTimeSeconds = ytTrack.verifiedWatchedSeconds || 0;
     requiredWatchTimeSeconds = ytTrack.durationSeconds || 3600;
     
-    if (simulatedWatchComplete) {
-      completionPercentage = 100;
-      watchTimeSeconds = requiredWatchTimeSeconds;
-    }
 
-    isWatchTimeSufficient = completionPercentage >= 75;
+
+    isWatchTimeSufficient = requiredWatchTimeSeconds > 0 && watchTimeSeconds >= requiredWatchTimeSeconds;
   }
 
   // Generate unique serial ID
@@ -411,8 +406,9 @@ export const CertificateGenerationModal: React.FC<CertificateGenerationModalProp
     setIsDownloading(false);
   };
 
-  const handleClaimAndSave = () => {
-    onCertificateClaimed(certificateData);
+  const handleClaimAndSave = async () => {
+    if (!isWatchTimeSufficient) throw new Error('Complete learning before claiming.');
+    await onCertificateClaimed(certificateData);
     setHasClaimed(true);
   };
 
@@ -447,6 +443,7 @@ export const CertificateGenerationModal: React.FC<CertificateGenerationModalProp
         </div>
 
         <div className="p-6 space-y-6 max-h-[80vh] overflow-y-auto">
+          {claimError && <p role="alert" className="text-red-600">{claimError}</p>}
           {/* Watch Time Verification Bar */}
           <div className={`p-4 rounded-2xl border ${
             isWatchTimeSufficient
@@ -476,14 +473,7 @@ export const CertificateGenerationModal: React.FC<CertificateGenerationModalProp
                 </div>
               </div>
 
-              {!isWatchTimeSufficient && (
-                <button
-                  onClick={() => setSimulatedWatchComplete(true)}
-                  className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-xs transition-all cursor-pointer whitespace-nowrap"
-                >
-                  Verify & Fast-Track 100%
-                </button>
-              )}
+
             </div>
           </div>
 
@@ -586,9 +576,10 @@ export const CertificateGenerationModal: React.FC<CertificateGenerationModalProp
           <div className="flex items-center gap-2 w-full sm:w-auto">
             {onShareToNetwork && (
               <button
-                onClick={() => {
-                  handleClaimAndSave();
-                  onShareToNetwork(certificateData);
+                disabled={!isWatchTimeSufficient}
+                onClick={async () => {
+                  try { await handleClaimAndSave(); onShareToNetwork(certificateData); }
+                  catch (e) { setClaimError((e as Error).message); }
                 }}
                 className="flex-1 sm:flex-none px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-md"
               >
@@ -598,9 +589,9 @@ export const CertificateGenerationModal: React.FC<CertificateGenerationModalProp
             )}
 
             <button
-              onClick={() => {
-                handleClaimAndSave();
-                handlePrintOrDownloadPDF();
+              onClick={async () => {
+                try { await handleClaimAndSave(); handlePrintOrDownloadPDF(); }
+                catch (e) { setClaimError((e as Error).message); }
               }}
               disabled={!isWatchTimeSufficient || isDownloading}
               className="flex-1 sm:flex-none px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
