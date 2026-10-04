@@ -9,3 +9,18 @@ coverage/
 
 supabase/.temp/
 server-dist/
+
+# Android SDKs, signing secrets and generated build output
+mobile/.tools/
+mobile/.signing/
+mobile/android/.gradle/
+mobile/android/local.properties
+mobile/android/app/build/
+mobile/android/build/
+mobile/android/*.apk
+mobile/android/*.aab
+mobile/android/manifest-checksum.txt
+*.keystore
+*.jks
+
+mobile/artifacts/

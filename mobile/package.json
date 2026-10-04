@@ -1,0 +1,12 @@
+{
+  "devDependencies": {
+    "@bubblewrap/cli": "1.25.0"
+  },
+  "name": "brain-boost-android",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "generate": "node generate.cjs",
+    "build": "powershell -ExecutionPolicy Bypass -File build.ps1 -Mode All"
+  }
+}

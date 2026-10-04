@@ -1,5 +1,5 @@
-const CACHE_NAME = 'brain-boost-v1';
-const APP_SHELL = ['/', '/manifest.webmanifest', '/brainboost-logo-192.webp', '/brainboost-logo-512.webp'];
+const CACHE_NAME = 'brain-boost-v2';
+const APP_SHELL = ['/offline.html', '/manifest.webmanifest', '/brainboost-logo-192.webp', '/brainboost-logo-512.webp'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -19,20 +19,20 @@ self.addEventListener('fetch', (event) => {
   const request = event.request;
   const url = new URL(request.url);
 
-  if (request.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/')) {
+  if (request.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/') || url.pathname.startsWith('/.well-known/') || url.pathname.startsWith('/downloads/')) {
     return;
   }
 
   if (request.mode === 'navigate') {
-    event.respondWith(
-      fetch(request)
-        .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put('/', copy));
-          return response;
-        })
-        .catch(() => caches.match('/'))
-    );
+    const offlineResponse = async () => {
+      const cached = await caches.match('/offline.html');
+      if (!cached) return new Response('No Internet Connection. Please reconnect and retry.', {status:503,headers:{'Content-Type':'text/plain'}});
+      const html = await cached.text();
+      // Keep the original URL (including OAuth callback state) available for Retry.
+      const returnTo = JSON.stringify(url.pathname + url.search).replace(/</g, '\\u003c');
+      return new Response(html.replace('const params=new URLSearchParams(location.search);', `const params=new URLSearchParams({returnTo:${returnTo}});`), {status:503,headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'}});
+    };
+    event.respondWith(fetch(request).then(response => response.status >= 500 ? offlineResponse() : response).catch(offlineResponse));
     return;
   }
 
@@ -58,5 +58,19 @@ self.addEventListener('notificationclick', (event) => {
     const existing = windows.find(client => new URL(client.url).origin === self.location.origin);
     if (existing) { await existing.navigate(target.href); return existing.focus(); }
     return self.clients.openWindow(target.href);
+  }));
+});
+
+// Ready for standards-based Web Push. Subscriptions and VAPID sender credentials
+// must be provisioned server-side; no messaging secret belongs in the APK.
+self.addEventListener('push', event => {
+  let payload = {};
+  try { payload = event.data ? event.data.json() : {}; } catch { /* Use a generic alert. */ }
+  let destination = '/#connectivity';
+  try { const url = new URL(payload.url || destination, self.location.origin); if (url.origin === self.location.origin) destination = url.pathname + url.search + url.hash; } catch {}
+  event.waitUntil(self.registration.showNotification(String(payload.title || 'Brain Boost').slice(0,120), {
+    body: String(payload.body || 'You have a new update.').slice(0,500),
+    icon: '/brainboost-logo-192.webp', tag: String(payload.tag || 'brainboost-update').slice(0,120),
+    data: { url: destination }
   }));
 });

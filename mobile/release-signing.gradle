@@ -1,0 +1,18 @@
+android {
+    signingConfigs {
+        release {
+            if (System.getenv('BRAINBOOST_SIGNING_PASSWORD')) {
+                storeFile file('../../.signing/brainboost-release.jks')
+                storePassword System.getenv('BRAINBOOST_SIGNING_PASSWORD')
+                keyAlias 'brainboost'
+                keyPassword System.getenv('BRAINBOOST_SIGNING_PASSWORD')
+            }
+        }
+    }
+    buildTypes {
+        release {
+            if (System.getenv('BRAINBOOST_SIGNING_PASSWORD')) signingConfig signingConfigs.release
+            minifyEnabled false
+        }
+    }
+}
