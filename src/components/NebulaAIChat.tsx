@@ -104,13 +104,18 @@ export const NebulaAIChat: React.FC<NebulaAIChatProps> = ({ user, onNavigate }) 
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const historyRequestRef = useRef(0);
   const speechRecognitionRef = useRef<any>(null);
   const langDropdownRef = useRef<HTMLDivElement>(null);
 
   // Restore chat messages for a specific session
   const restoreHistory = useCallback(async (id: string) => {
+    const request = ++historyRequestRef.current;
+    const applyMessages = (next: ChatMessage[]) => {
+      if (request === historyRequestRef.current) setMessages(next);
+    };
     if (!id) {
-      setMessages([]);
+      applyMessages([]);
       return;
     }
 
@@ -119,7 +124,7 @@ export const NebulaAIChat: React.FC<NebulaAIChatProps> = ({ user, onNavigate }) 
       try {
         const localStored = localStorage.getItem(`nebula_messages_${id}`);
         if (localStored) {
-          setMessages(JSON.parse(localStored));
+          applyMessages(JSON.parse(localStored));
           return;
         }
       } catch {}
@@ -139,7 +144,7 @@ export const NebulaAIChat: React.FC<NebulaAIChatProps> = ({ user, onNavigate }) 
         console.warn('Supabase restoreHistory error, checking local storage:', error.message);
         const localStored = localStorage.getItem(`nebula_messages_${id}`);
         if (localStored) {
-          setMessages(JSON.parse(localStored));
+          applyMessages(JSON.parse(localStored));
         }
         return;
       }
@@ -157,16 +162,16 @@ export const NebulaAIChat: React.FC<NebulaAIChatProps> = ({ user, onNavigate }) 
           thinkingModeActive: row.thinking_mode_active,
           language: row.language,
         }));
-        setMessages(parsed);
+        applyMessages(parsed);
         try {
           localStorage.setItem(`nebula_messages_${id}`, JSON.stringify(parsed));
         } catch {}
       } else {
         const localStored = localStorage.getItem(`nebula_messages_${id}`);
         if (localStored) {
-          setMessages(JSON.parse(localStored));
+          applyMessages(JSON.parse(localStored));
         } else {
-          setMessages([]);
+          applyMessages([]);
         }
       }
     } catch (err: any) {
@@ -174,16 +179,16 @@ export const NebulaAIChat: React.FC<NebulaAIChatProps> = ({ user, onNavigate }) 
       try {
         const localStored = localStorage.getItem(`nebula_messages_${id}`);
         if (localStored) {
-          setMessages(JSON.parse(localStored));
+          applyMessages(JSON.parse(localStored));
         }
       } catch {}
     } finally {
-      setHistoryLoading(false);
+      if (request === historyRequestRef.current) setHistoryLoading(false);
     }
   }, []);
 
   // Fetch all chat sessions for previous chat list
-  const fetchSessions = useCallback(async (autoSelectLatest = false) => {
+  const fetchSessions = useCallback(async () => {
     try {
       let remoteSessions: ChatSessionMeta[] = [];
 
@@ -244,26 +249,25 @@ export const NebulaAIChat: React.FC<NebulaAIChatProps> = ({ user, onNavigate }) 
 
       setSessions(allSessions);
 
-      if (autoSelectLatest && allSessions.length > 0) {
-        setSessionId(allSessions[0].id);
-        await restoreHistory(allSessions[0].id);
-      }
     } catch (err: any) {
       console.warn('Could not load chat sessions:', err);
     }
-  }, [user.id, restoreHistory]);
+  }, [user.id]);
 
-  // Initial load on mount
+  // Opening the chatbot always starts fresh; saved chats load only into the sidebar.
   useEffect(() => {
-    let active = true;
-    (async () => {
-      if (active) {
-        await fetchSessions(true);
-      }
-    })();
+    historyRequestRef.current++;
+    setSessionId(null);
+    setMessages([]);
+    setInputMessage('');
+    setChatError('');
+    setHistoryLoading(false);
+    setIsLoading(false);
+    void fetchSessions();
     return () => {
-      active = false;
+      historyRequestRef.current++;
       abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
     };
   }, [fetchSessions]);
 
@@ -431,6 +435,7 @@ export const NebulaAIChat: React.FC<NebulaAIChatProps> = ({ user, onNavigate }) 
       });
 
       const data = await response.json();
+      if (abortControllerRef.current !== controller) return;
       if (!response.ok || data.error) throw new Error(data.error || 'AI request failed.');
       const replyContent = data.reply || data.content;
       if (!replyContent) throw new Error('AI returned an empty response. Please retry.');
@@ -490,8 +495,9 @@ export const NebulaAIChat: React.FC<NebulaAIChatProps> = ({ user, onNavigate }) 
       }
 
       // Refresh sidebar list
-      fetchSessions(false);
+      fetchSessions();
     } catch (error: any) {
+      if (abortControllerRef.current !== controller) return;
       setMessages(messages);
       setInputMessage(text);
       setChatError(
@@ -500,8 +506,10 @@ export const NebulaAIChat: React.FC<NebulaAIChatProps> = ({ user, onNavigate }) 
           : error.message || 'Unable to send message. Please try again.'
       );
     } finally {
-      setIsLoading(false);
-      abortControllerRef.current = null;
+      if (abortControllerRef.current === controller) {
+        setIsLoading(false);
+        abortControllerRef.current = null;
+      }
     }
   };
 
@@ -586,7 +594,7 @@ export const NebulaAIChat: React.FC<NebulaAIChatProps> = ({ user, onNavigate }) 
       setSessionId(null);
       setMessages([]);
       setChatError('');
-      fetchSessions(false);
+      fetchSessions();
     } catch {
       setSessionId(null);
       setMessages([]);
@@ -596,6 +604,12 @@ export const NebulaAIChat: React.FC<NebulaAIChatProps> = ({ user, onNavigate }) 
 
   // Start a new chat
   const handleNewChat = () => {
+    historyRequestRef.current++;
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    setHistoryLoading(false);
+    setIsLoading(false);
+    setStreamingText('');
     setSessionId(null);
     setMessages([]);
     setInputMessage('');
@@ -605,6 +619,7 @@ export const NebulaAIChat: React.FC<NebulaAIChatProps> = ({ user, onNavigate }) 
   // Select a session from the previous chat list
   const handleSelectSession = async (id: string) => {
     if (id === sessionId) return;
+    handleNewChat();
     setSessionId(id);
     setChatError('');
     await restoreHistory(id);
