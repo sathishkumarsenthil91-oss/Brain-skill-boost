@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "app.brainboost.mobile",
+      "sha256_cert_fingerprints": [
+        "52:54:F3:60:B9:83:E8:C4:2C:A4:86:31:70:E3:EE:7C:25:DD:C2:7B:31:19:CB:85:FA:76:0A:8C:94:E1:25:A6"
+      ]
+    }
+  }
+]

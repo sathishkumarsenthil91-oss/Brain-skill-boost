@@ -130,6 +130,7 @@ export default function App() {
   // Sync dark mode class with root html element and localStorage
   useEffect(() => {
     try {
+      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', isDarkMode ? '#0b1329' : '#ffffff');
       if (isDarkMode) {
         document.documentElement.classList.add('dark');
         localStorage.setItem('brainboost_theme', 'dark');
